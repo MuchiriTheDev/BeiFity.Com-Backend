@@ -1,0 +1,513 @@
+import jwt from 'jsonwebtoken';
+import { userModel } from '../models/User.js';
+import { listingModel } from '../models/Listing.js'; // Assuming Listing model exists
+import bcrypt from 'bcryptjs';
+import logger from '../utils/logger.js';
+import env from '../config/env.js';
+
+/**
+ * Update Profile Views
+ * @route POST /api/profile/:sellerId/views
+ * @desc Record a view for a user’s profile and increment view count
+ * @access Public
+ */
+export const updateProfileViews = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const { viewerId } = req.body;
+
+    if (!sellerId || !viewerId) {
+      logger.warn('Profile views update failed: Missing sellerId or viewerId', { sellerId, viewerId });
+      return res.status(400).json({ success: false, message: 'Missing sellerId or viewerId' });
+    }
+
+    const user = await userModel.findById(sellerId);
+    if (!user) {
+      logger.warn(`Profile views update failed: User ${sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.analytics.profileViews.uniqueViewers.includes(viewerId)) {
+      logger.debug(`Profile view already recorded for viewer ${viewerId} on user ${sellerId}`);
+      return res.status(200).json({ success: true, message: 'View already recorded for this user' });
+    }
+
+    await userModel.findByIdAndUpdate(
+      sellerId,
+      {
+        $push: {
+          'analytics.profileViews.uniqueViewers': viewerId,
+          'analytics.profileViews.history': { viewerId, date: new Date() },
+        },
+        $inc: { 'analytics.profileViews.total': 1 },
+      },
+      { new: true, runValidators: true }
+    );
+
+    logger.info(`Profile view recorded for user ${sellerId} by viewer ${viewerId}`);
+    return res.status(200).json({ success: true, message: 'Profile view recorded successfully' });
+  } catch (error) {
+    logger.error(`Error updating profile views: ${error.message}`, { stack: error.stack, sellerId });
+    return res.status(500).json({ success: false, message: 'Failed to update profile views' });
+  }
+};
+
+/**
+ * Get User Profile (Public)
+ * @route GET /api/profile/:userId
+ * @desc Fetch a user’s public profile by ID
+ * @access Public
+ */
+export const getUserProfile = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await userModel.findById(userId).select('-personalInfo.password');
+    if (!user) {
+      logger.warn(`User profile fetch failed: User ${userId} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    logger.info(`User profile fetched for user ${userId}`);
+    return res.status(200).json({ success: true, data: user });
+  } catch (error) {
+    logger.error(`Error fetching user profile: ${error.message}`, { stack: error.stack, userId });
+    return res.status(500).json({ success: false, message: 'Failed to fetch user profile' });
+  }
+};
+
+/**
+ * Get Authenticated User Profile
+ * @route GET /api/profile/profile
+ * @desc Fetch the authenticated user’s full profile
+ * @access Private (requires token)
+ */
+export const getAuthenticatedProfile = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Authenticated profile fetch failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to access your profile' });
+    }
+
+    const user = await userModel.findById(req.user._id).select('-personalInfo.password');
+    if (!user) {
+      logger.warn(`Authenticated profile fetch failed: User ${req.user._id} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    logger.info(`Authenticated profile fetched for user ${req.user._id}`);
+    return res.status(200).json({
+      success: true,
+      data: {
+        personalInfo: user.personalInfo,
+        analytics: user.analytics,
+        rating: user.rating,
+        stats: user.stats,
+        isFeatured: user.isFeatured,
+        badges: user.badges,
+        preferences: user.preferences,
+        referralCode: user.referralCode,
+        wishlist: user.wishlist,
+        listings: user.listings,
+        orders: user.orders,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error fetching authenticated profile: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    return res.status(500).json({ success: false, message: 'Failed to fetch authenticated profile' });
+  }
+};
+
+/**
+ * Update User Profile
+ * @route PUT /api/profile/profile
+ * @desc Update the authenticated user’s profile
+ * @access Private (requires token)
+ * @body {personalInfo: {fullname, username, email, profilePicture, phone, location, bio, socialLinks}, oldPassword, newPassword, preferences}
+ */
+export const updateUserProfile = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Profile update failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to update your profile' });
+    }
+
+    const user = await userModel.findById(req.user._id);
+    if (!user) {
+      logger.warn(`Profile update failed: User ${req.user._id} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const { personalInfo, oldPassword, newPassword, preferences } = req.body;
+
+    logger.debug(`Profile update data for user ${req.user._id}: ${JSON.stringify(req.body)}`);
+
+    // Update personalInfo fields
+    if (personalInfo) {
+      user.personalInfo.fullname = personalInfo.fullname?.trim() || user.personalInfo.fullname;
+      user.personalInfo.username = personalInfo.username?.trim() || user.personalInfo.username;
+      user.personalInfo.email = personalInfo.email?.trim() || user.personalInfo.email;
+      user.personalInfo.profilePicture = personalInfo.profilePicture || user.personalInfo.profilePicture;
+      user.personalInfo.phone = personalInfo.phone?.trim() || user.personalInfo.phone;
+      user.personalInfo.location = personalInfo.location || user.personalInfo.location;
+      user.personalInfo.bio = personalInfo.bio?.trim() || user.personalInfo.bio;
+      user.personalInfo.socialLinks = personalInfo.socialLinks || user.personalInfo.socialLinks;
+    }
+
+    // Handle password update
+    if (oldPassword && newPassword) {
+      if (newPassword.length < 6) {
+        logger.warn(`Profile update failed: New password too short for user ${req.user._id}`);
+        return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+      }
+      const isValidPassword = await bcrypt.compare(oldPassword, user.personalInfo.password);
+      if (!isValidPassword) {
+        logger.warn(`Profile update failed: Invalid old password for user ${req.user._id}`);
+        return res.status(400).json({ success: false, message: 'Invalid old password' });
+      }
+      user.personalInfo.password = await bcrypt.hash(newPassword, 10);
+      logger.info(`Password updated for user ${req.user._id}`);
+    } else if (oldPassword || newPassword) {
+      logger.warn(`Profile update failed: Both oldPassword and newPassword required for user ${req.user._id}`);
+      return res.status(400).json({ success: false, message: 'Both oldPassword and newPassword are required' });
+    }
+
+    // Update preferences
+    user.preferences = preferences || user.preferences;
+
+    // Update lastActive
+    user.analytics.lastActive = new Date();
+
+    const updatedUser = await user.save();
+
+    logger.info(`Profile updated for user ${req.user._id}`);
+    return res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        fullname: updatedUser.personalInfo.fullname,
+        username: updatedUser.personalInfo.username,
+        email: updatedUser.personalInfo.email,
+        profilePicture: updatedUser.personalInfo.profilePicture,
+        phone: updatedUser.personalInfo.phone,
+        location: updatedUser.personalInfo.location,
+        bio: updatedUser.personalInfo.bio,
+        socialLinks: updatedUser.personalInfo.socialLinks,
+        preferences: updatedUser.preferences,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    return res.status(500).json({ success: false, message: 'Failed to update user profile' });
+  }
+};
+
+/**
+ * Get Seller Profile
+ * @route GET /api/profile/seller/:sellerId
+ * @desc Fetch a seller’s public profile by ID
+ * @access Public
+ */
+export const getSeller = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const seller = await userModel.findById(sellerId).select('-personalInfo.password');
+    if (!seller) {
+      logger.warn(`Seller profile fetch failed: Seller ${sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'Seller not found' });
+    }
+
+    logger.info(`Seller profile fetched for seller ${sellerId}`);
+    return res.status(200).json({
+      success: true,
+      data: {
+        personalInfo: {
+          fullname: seller.personalInfo.fullname,
+          username: seller.personalInfo.username,
+          profilePicture: seller.personalInfo.profilePicture,
+          phone: seller.personalInfo.phone,
+          bio: seller.personalInfo.bio,
+          location: seller.personalInfo.location,
+          verified: seller.personalInfo.verified,
+          socialLinks: seller.personalInfo.socialLinks,
+        },
+        reviews: seller.reviews,
+        rating: seller.rating,
+        stats: seller.stats,
+        badges: seller.badges,
+        listings: seller.listings,
+        isFeatured: seller.isFeatured,
+        createdAt: seller.createdAt,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error fetching seller profile: ${error.message}`, { stack: error.stack, sellerId });
+    return res.status(500).json({ success: false, message: 'Failed to fetch seller profile' });
+  }
+};
+
+/**
+ * Get All Users
+ * @route GET /api/profile
+ * @desc Fetch a list of all users (public data only)
+ * @access Public
+ */
+export const getUsers = async (req, res) => {
+  try {
+    const users = await userModel.find().select('-personalInfo.password');
+    const data = users.map((user) => ({
+      userId: user._id,
+      fullname: user.personalInfo.fullname,
+      username: user.personalInfo.username,
+      phone: user.personalInfo.phone,
+      profilePicture: user.personalInfo.profilePicture,
+      rating: user.rating,
+      isFeatured: user.isFeatured,
+    }));
+
+    logger.info(`Fetched ${users.length} users`);
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    logger.error(`Error fetching users: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'Failed to fetch users' });
+  }
+};
+
+/**
+ * Get Specific Users by IDs
+ * @route POST /api/profile/specific
+ * @desc Fetch specific users by their IDs (e.g., for reviews)
+ * @access Public
+ * @body {reviewIds}
+ */
+export const getSpecificPeople = async (req, res) => {
+  try {
+    const { reviewIds } = req.body;
+
+    if (!reviewIds || !Array.isArray(reviewIds) || reviewIds.length === 0) {
+      logger.warn('Specific users fetch failed: Invalid or empty reviewIds', { reviewIds });
+      return res.status(400).json({ success: false, message: 'No valid IDs provided' });
+    }
+
+    const users = await userModel.find({ _id: { $in: reviewIds } }).select('-personalInfo.password');
+    if (!users.length) {
+      logger.warn(`Specific users fetch failed: No users found for IDs ${reviewIds.join(', ')}`);
+      return res.status(404).json({ success: false, message: 'No users found with the provided IDs' });
+    }
+
+    const data = users.map((user) => ({
+      userId: user._id,
+      fullname: user.personalInfo.fullname,
+      username: user.personalInfo.username,
+      profilePicture: user.personalInfo.profilePicture,
+    }));
+
+    logger.info(`Fetched ${users.length} specific users`);
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    logger.error(`Error fetching specific users: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'Failed to fetch specific users' });
+  }
+};
+
+/**
+ * Add to Wishlist
+ * @route POST /api/profile/wishlist/:listingId
+ * @desc Add a listing to the authenticated user’s wishlist
+ * @access Private (requires token)
+ * @param {string} listingId - Listing ID to add
+ */
+export const addToWishlist = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Add to wishlist failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to add to wishlist' });
+    }
+
+    const { listingId } = req.params;
+
+    const user = await userModel.findById(req.user._id);
+    if (!user) {
+      logger.warn(`Add to wishlist failed: User ${req.user._id} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const listing = await listingModel.findById(listingId);
+    if (!listing) {
+      logger.warn(`Add to wishlist failed: Listing ${listingId} not found for user ${req.user._id}`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+
+    if (user.wishlist.includes(listingId)) {
+      logger.debug(`Wishlist addition skipped: Listing ${listingId} already in wishlist for user ${req.user._id}`);
+      return res.status(200).json({ success: true, message: 'Listing already in wishlist' });
+    }
+
+    await userModel.findByIdAndUpdate(
+      req.user._id,
+      { $push: { wishlist: listingId } },
+      { new: true }
+    );
+
+    logger.info(`Listing ${listingId} added to wishlist for user ${req.user._id}`);
+    return res.status(200).json({ success: true, message: 'Added to wishlist successfully' });
+  } catch (error) {
+    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack, userId: req.user?._id, listingId });
+    return res.status(500).json({ success: false, message: 'Failed to add to wishlist' });
+  }
+};
+
+/**
+ * Remove from Wishlist
+ * @route DELETE /api/profile/wishlist/:listingId
+ * @desc Remove a listing from the authenticated user’s wishlist
+ * @access Private (requires token)
+ * @param {string} listingId - Listing ID to remove
+ */
+export const removeFromWishlist = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Remove from wishlist failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to remove from wishlist' });
+    }
+
+    const { listingId } = req.params;
+
+    const user = await userModel.findById(req.user._id);
+    if (!user) {
+      logger.warn(`Remove from wishlist failed: User ${req.user._id} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (!user.wishlist.includes(listingId)) {
+      logger.warn(`Remove from wishlist failed: Listing ${listingId} not in wishlist for user ${req.user._id}`);
+      return res.status(400).json({ success: false, message: 'Listing not in wishlist' });
+    }
+
+    await userModel.findByIdAndUpdate(
+      req.user._id,
+      { $pull: { wishlist: listingId } },
+      { new: true }
+    );
+
+    logger.info(`Listing ${listingId} removed from wishlist for user ${req.user._id}`);
+    return res.status(200).json({ success: true, message: 'Removed from wishlist successfully' });
+  } catch (error) {
+    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack, userId: req.user?._id, listingId });
+    return res.status(500).json({ success: false, message: 'Failed to remove from wishlist' });
+  }
+};
+
+/**
+ * Get Referral Link
+ * @route GET /api/profile/referral
+ * @desc Get the authenticated user’s referral link
+ * @access Private (requires token)
+ */
+export const getReferralLink = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Referral link fetch failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to get referral link' });
+    }
+
+    const user = await userModel.findById(req.user._id);
+    if (!user) {
+      logger.warn(`Referral link fetch failed: User ${req.user._id} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const referralLink = `${env.FRONTEND_URL}/sign-up?ref=${user.referralCode}`;
+    logger.info(`Referral link generated for user ${req.user._id}`);
+    return res.status(200).json({
+      success: true,
+      referralLink,
+      referralCode: user.referralCode,
+      message: 'Referral link generated successfully',
+    });
+  } catch (error) {
+    logger.error(`Error fetching referral link: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    return res.status(500).json({ success: false, message: 'Failed to fetch referral link' });
+  }
+};
+
+/**
+ * Add Seller Review
+ * @route POST /api/profile/:sellerId/reviews
+ * @desc Add a review for a seller
+ * @access Private (requires token)
+ */
+export const addSellerReview = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Seller review addition failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to add a review' });
+    }
+
+    const { sellerId } = req.params;
+    const { rating, comment, userId } = req.body;
+
+    if (!sellerId) {
+      logger.warn('Seller review addition failed: Seller ID missing');
+      return res.status(400).json({ success: false, message: 'Seller ID is required' });
+    }
+
+    if (userId !== req.user._id.toString()) {
+      logger.warn(`Seller review addition failed: User ${req.user._id} attempted to review as ${userId}`);
+      return res.status(403).json({ success: false, message: 'Unauthorized: Cannot review as another user' });
+    }
+
+    if (!rating || !comment) {
+      logger.warn('Seller review addition failed: Rating or comment missing', { sellerId, userId });
+      return res.status(400).json({ success: false, message: 'Rating and comment are required' });
+    }
+
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      logger.warn(`Seller review addition failed: Invalid rating ${rating} for seller ${sellerId}`);
+      return res.status(400).json({ success: false, message: 'Rating must be an integer between 1 and 5' });
+    }
+
+    const user = await userModel.findById(sellerId);
+    if (!user) {
+      logger.warn(`Seller review addition failed: Seller ${sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'Seller not found' });
+    }
+
+    // Check if user has already reviewed this seller
+    if (user.reviews.some((review) => review.reviewer.toString() === userId)) {
+      logger.warn(`Seller review addition failed: User ${userId} already reviewed seller ${sellerId}`);
+      return res.status(400).json({ success: false, message: 'You have already reviewed this seller' });
+    }
+
+    const review = {
+      reviewer: userId,
+      comment: comment.trim(),
+      rating,
+      createdAt: new Date(),
+    };
+
+    const updatedUser = await userModel.findOneAndUpdate(
+      { _id: sellerId },
+      { $push: { reviews: review } },
+      { new: true, runValidators: true }
+    );
+
+    const totalRatings = updatedUser.reviews.reduce((sum, rev) => sum + rev.rating, 0);
+    const averageRating = totalRatings / updatedUser.reviews.length;
+
+    await userModel.findOneAndUpdate(
+      { _id: sellerId },
+      { 'rating.average': averageRating.toFixed(1), 'rating.reviewCount': updatedUser.reviews.length },
+      { new: true }
+    );
+
+    logger.info(`Review added for seller ${sellerId} by user ${userId}`);
+    return res.status(200).json({
+      success: true,
+      message: 'Seller review added successfully',
+    });
+  } catch (error) {
+    logger.error(`Error adding seller review: ${error.message}`, { stack: error.stack, sellerId, userId });
+    return res.status(500).json({ success: false, message: 'Failed to add seller review' });
+  }
+};
