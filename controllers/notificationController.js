@@ -229,8 +229,8 @@ export const createNotification = async (req, res) => {
       const payload = JSON.stringify({
         title: type === 'message' && senderDetails ? senderDetails.personalInfo.fullname : 'BeiFity.Com',
         body: sanitizeHtml(content),
-        icon: `${FRONTEND_URL}/assets/notification-icon.png`,
-        badge: `${FRONTEND_URL}/assets/notification-badge.png`,
+        icon: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
+        badge: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
         vibrate: [200, 100, 200],
         timestamp: Date.now(),
         actions: [
