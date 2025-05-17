@@ -7,6 +7,7 @@ import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
 import env from '../config/env.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { notificationModel } from '../models/Notifications.js';
 
 // Environment variables
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
@@ -123,7 +124,7 @@ export const sendListingNotification = async (
     }
 
     // Save notification
-    const notification = new NotificationModel({
+    const notification = new notificationModel({
       userId,
       type,
       content: sanitizeHtml(content),
@@ -219,7 +220,6 @@ export const addListing = async (req, res) => {
       inventory,
       shippingOptions,
       featured,
-      images, // Array of { url: String, public_id: String }
     } = req.body;
     const userId = req.user._id.toString();
 
@@ -228,28 +228,14 @@ export const addListing = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields: product name, price, and AgreedToTerms' });
     }
 
-    if (images && (!Array.isArray(images) || images.length > MAX_IMAGES_PER_LISTING)) {
-      logger.warn(`Add listing failed: Invalid or too many images`, { userId, imageCount: images?.length });
+    if (productInfo?.images && (!Array.isArray(productInfo?.images) || productInfo.images?.length > 5)) {
+      logger.warn(`Add listing failed: Invalid or too many images`, { userId, imageCount: productInfo.images?.length });
       return res.status(400).json({
         success: false,
-        message: `Images must be an array with up to ${MAX_IMAGES_PER_LISTING} items`,
+        message: `Images must be an array with up to ${productInfo.images?.length} items`,
       });
     }
 
-    // Validate images
-    if (images) {
-      for (const image of images) {
-        if (!image.url || !image.public_id) {
-          logger.warn('Add listing failed: Invalid image format', { userId });
-          return res.status(400).json({ success: false, message: 'Each image must include url and public_id' });
-        }
-        // Verify image belongs to user (optional, for extra security)
-        if (!image.public_id.startsWith(`beifity/users/${userId}/uploads`) && !req.user.personalInfo.isAdmin) {
-          logger.warn(`Add listing failed: Image ${image.public_id} not owned by user`, { userId });
-          return res.status(403).json({ success: false, message: 'Unauthorized to use this image' });
-        }
-      }
-    }
 
     // Validate inventory
     if (typeof inventory !== 'number' || inventory < 1) {
@@ -272,7 +258,7 @@ export const addListing = async (req, res) => {
         name: sanitizeHtml(productInfo.name.trim()),
         description: sanitizeHtml(productInfo.description?.trim() || ''),
         price: Number(productInfo.price),
-        images: images || [],
+        images: productInfo?.images || [],
       },
       seller: {
         sellerId: req.user._id,
@@ -306,30 +292,30 @@ export const addListing = async (req, res) => {
     );
 
     // // Notify seller
-    // await sendListingNotification(
-    //   userId,
-    //   'listing_created',
-    //   `Your listing "${listingData.productInfo.name}" with ${images?.length || 0} image(s) has been created and is pending verification.`,
-    //   productId,
-    //   null,
-    //   session
-    // );
+    await sendListingNotification(
+      userId,
+      'listing_created',
+      `Your listing "${listingData.productInfo.name}" with ${productInfo?.images?.length || 0} image(s) has been created and is pending verification.`,
+      productId,
+      null,
+      session
+    );
 
-    // // Notify admins
-    // const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
-    // for (const admin of admins) {
-    //   await sendListingNotification(
-    //     admin._id,
-    //     'admin_pending_listing',
-    //     `A new listing "${listingData.productInfo.name}" by ${req.user.personalInfo.fullname} is pending verification.`,
-    //     productId,
-    //     req.user._id,
-    //     session
-    //   );
-    // }
+    // Notify admins
+    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
+    for (const admin of admins) {
+      await sendListingNotification(
+        admin._id,
+        'admin_pending_listing',
+        `A new listing "${listingData.productInfo.name}" by ${admin.personalInfo.fullname} is pending verification.`,
+        productId,
+        req.user._id,
+        session
+      );
+    }
 
     await session.commitTransaction();
-    logger.info(`Listing created with ${images?.length || 0} images by user ${userId}: ${productId}`);
+    logger.info(`Listing created with ${productInfo.images?.length || 0} images by user ${userId}: ${productId}`);
     res.status(201).json({
       success: true,
       message: 'Listing created, pending verification',
@@ -338,6 +324,7 @@ export const addListing = async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     logger.error(`Error adding listing: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    console.error(error);
     res.status(500).json({ success: false, message: 'Failed to add listing' });
   } finally {
     session.endSession();
@@ -357,15 +344,16 @@ export const verifyListing = async (req, res) => {
       logger.warn('Verify listing failed: No user data in request');
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
+    const adminId = req.user._id.toString();
+    const admin = await userModel.findById(adminId).session(session);
 
-    if (!req.user.personalInfo?.isAdmin) {
+    if (!admin.personalInfo?.isAdmin) {
       logger.warn(`Verify listing failed: User ${req.user._id} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
     }
 
     const { productId } = req.params;
     const { status } = req.body;
-    const adminId = req.user._id.toString();
 
     if (!['Verified', 'Rejected'].includes(status)) {
       logger.warn(`Verify listing failed: Invalid status ${status}`, { productId });
@@ -1642,7 +1630,9 @@ export const getSellerListings = async (req, res) => {
 export const getPendingListings = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
-    if (!req.user.personalInfo?.isAdmin)
+    const adminId = req.user._id.toString();
+    const admin = await userModel.findById(adminId);
+    if (!admin || !admin.personalInfo?.isAdmin)
       return res.status(403).json({ success: false, message: 'Admin access required' });
 
     const listings = await listingModel
