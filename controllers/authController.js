@@ -176,6 +176,12 @@ export const verification = async (req, res) => {
     await verifiedToken.deleteOne();
     logger.info(`Email verified for user: ${id}`);
 
+    await sendEmail(
+      user.personalInfo.email,
+      'Email Verified Successfully',
+      ``
+    )
+
     const userToken = generateToken(user._id);
     return res.status(200).json({
       success: true,

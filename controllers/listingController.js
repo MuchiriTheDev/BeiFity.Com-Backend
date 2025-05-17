@@ -305,28 +305,28 @@ export const addListing = async (req, res) => {
       { session }
     );
 
-    // Notify seller
-    await sendListingNotification(
-      userId,
-      'listing_created',
-      `Your listing "${listingData.productInfo.name}" with ${images?.length || 0} image(s) has been created and is pending verification.`,
-      productId,
-      null,
-      session
-    );
+    // // Notify seller
+    // await sendListingNotification(
+    //   userId,
+    //   'listing_created',
+    //   `Your listing "${listingData.productInfo.name}" with ${images?.length || 0} image(s) has been created and is pending verification.`,
+    //   productId,
+    //   null,
+    //   session
+    // );
 
-    // Notify admins
-    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
-    for (const admin of admins) {
-      await sendListingNotification(
-        admin._id,
-        'admin_pending_listing',
-        `A new listing "${listingData.productInfo.name}" by ${req.user.personalInfo.fullname} is pending verification.`,
-        productId,
-        req.user._id,
-        session
-      );
-    }
+    // // Notify admins
+    // const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
+    // for (const admin of admins) {
+    //   await sendListingNotification(
+    //     admin._id,
+    //     'admin_pending_listing',
+    //     `A new listing "${listingData.productInfo.name}" by ${req.user.personalInfo.fullname} is pending verification.`,
+    //     productId,
+    //     req.user._id,
+    //     session
+    //   );
+    // }
 
     await session.commitTransaction();
     logger.info(`Listing created with ${images?.length || 0} images by user ${userId}: ${productId}`);

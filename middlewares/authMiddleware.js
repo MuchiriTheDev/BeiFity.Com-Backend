@@ -1,7 +1,9 @@
 import jwt from 'jsonwebtoken';
 import env from '../config/env.js';
 import logger from '../utils/logger.js';
+import { OAuth2Client } from 'google-auth-library';
 
+// Authentication middleware
 export const authUser = (req, res, next) => {
   const { token } = req.headers;
 
@@ -13,7 +15,7 @@ export const authUser = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, env.SECRET_KEY);
     req.user = decoded; // Attach decoded user data (e.g., _id) to req.user
-    logger.debug(`Token verified for user ${_id}`, { userId: decoded._id, url: req.originalUrl });
+    logger.debug(`Token verified for user ${decoded._id}`, { userId: decoded._id, url: req.originalUrl });
     next();
   } catch (error) {
     let message = 'Unauthorized: Invalid token';
@@ -31,3 +33,4 @@ export const authUser = (req, res, next) => {
     return res.status(401).json({ success: false, message });
   }
 };
+
