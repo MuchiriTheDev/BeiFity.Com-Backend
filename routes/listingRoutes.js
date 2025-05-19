@@ -24,7 +24,7 @@ import {
   getFeaturedListings,
   getListingsNear,
   transferGuestData,
-  removeToCart,
+  removeFromCart,
   markAsUnSold,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
@@ -43,7 +43,7 @@ listingRouter.post("/transfer-guest-data", transferGuestData);
 listingRouter.post('/:productId/wishlist/add',  addToWishlist);
 listingRouter.post('/:productId/wishlist/remove',  removeFromWishlist);
 listingRouter.post('/:productId/cart/add',  addToCart);
-listingRouter.post('/:productId/cart/remove', removeToCart)
+listingRouter.post('/:productId/cart/remove', removeFromCart)
 
 // Private Routes (authenticated users)
 listingRouter.post('/add', authUser, addListing);

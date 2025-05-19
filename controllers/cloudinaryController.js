@@ -3,21 +3,17 @@ import mongoose from 'mongoose';
 import { userModel } from '../models/User.js';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
-import env from '../config/env.js';
 import { sendListingNotification } from './listingController.js'; // Import from listingController.js
-
-
 
 // Constants
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_FILES_PER_REQUEST = 10;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
 
 /**
  * Upload Images
  * @route POST /api/cloudinary/upload
- * @desc Upload one or more images to Cloudinary, returning URLs and public_ids
+ * @desc Upload one or more images to Cloudinary, returning URLs
  * @access Private (requires JWT token)
  */
 export const uploadImages = async (req, res) => {
@@ -46,7 +42,7 @@ export const uploadImages = async (req, res) => {
     }
 
     // Validate and upload images
-    const uploadedImages = [];
+    const uploadedImageUrls = [];
     for (const file of files) {
       if (!file.data || !file.mimeType) {
         logger.warn('Upload images failed: Invalid file format', { userId });
@@ -74,8 +70,7 @@ export const uploadImages = async (req, res) => {
 
       // Upload to Cloudinary
       const uploadResponse = await cloudinary.uploader.upload(file.data, {
-        folder: `beifity/users/${userId}/uploads`,
-        upload_preset: 'listing_images',
+        folder: `beifity/users/listings/${userId}`,
         transformation: [
           { width: 800, height: 800, crop: 'limit', quality: 'auto' },
           { format: 'webp' },
@@ -83,35 +78,26 @@ export const uploadImages = async (req, res) => {
         resource_type: 'image',
       });
 
-      uploadedImages.push({
-        url: uploadResponse.secure_url,
-        public_id: uploadResponse.public_id,
-      });
+      uploadedImageUrls.push(uploadResponse.secure_url);
     }
-
-    // Update user analytics
-    await userModel.findByIdAndUpdate(
-      userId,
-      { $inc: { 'analytics.imagesUploaded': uploadedImages.length } },
-      { session }
-    );
 
     // Notify user
     await sendListingNotification(
       userId,
       'image_uploaded',
-      `You successfully uploaded ${uploadedImages.length} image(s) to your account.`,
+      `You successfully uploaded ${uploadedImageUrls.length} image(s) to your account.`,
       null, // No productId since not tied to a specific listing
       userId,
       session
     );
 
     await session.commitTransaction();
-    logger.info(`Uploaded ${uploadedImages.length} images by user ${userId}`);
+    logger.info(`Uploaded ${uploadedImageUrls.length} images by user ${userId}`);
+    logger.debug('Uploaded image URLs', { uploadedImageUrls });
     res.status(201).json({
       success: true,
-      message: `${uploadedImages.length} image(s) uploaded successfully`,
-      data: uploadedImages,
+      message: `${uploadedImageUrls.length} image(s) uploaded successfully`,
+      data: uploadedImageUrls, // Return only URLs to match ListingSchema
     });
   } catch (error) {
     await session.abortTransaction();
@@ -152,41 +138,12 @@ export const deleteImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Public ID required' });
     }
 
-    // Verify ownership (check if public_id is in user's uploads or listings)
-    const user = await userModel.findById(userId).session(session);
-    if (!user) {
-      logger.warn(`Delete image failed: User ${userId} not found`);
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    // Check if image is associated with any listing
-    const listingWithImage = await listingModel.findOne({
-      'productInfo.images.public_id': public_id,
-      'seller.sellerId': userId,
-    }).session(session);
-
-    if (!listingWithImage && !req.user.personalInfo.isAdmin) {
-      // Admins can delete any image; users can only delete their own unused images
-      const isUserImage = public_id.startsWith(`beifity/users/${userId}/uploads`);
-      if (!isUserImage) {
-        logger.warn(`Delete image failed: User ${userId} not authorized for image ${public_id}`);
-        return res.status(403).json({ success: false, message: 'Unauthorized to delete this image' });
-      }
-    }
-
     // Delete from Cloudinary
     const result = await cloudinary.uploader.destroy(public_id);
     if (result.result !== 'ok') {
       logger.warn(`Delete image failed: Cloudinary deletion failed for ${public_id}`, { userId });
       return res.status(400).json({ success: false, message: 'Failed to delete image from Cloudinary' });
     }
-
-    // Update user analytics
-    await userModel.findByIdAndUpdate(
-      userId,
-      { $inc: { 'analytics.imagesDeleted': 1 } },
-      { session }
-    );
 
     // Notify user
     await sendListingNotification(

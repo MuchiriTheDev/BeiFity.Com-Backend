@@ -2,111 +2,11 @@ import mongoose from 'mongoose';
 import { listingModel } from '../models/Listing.js';
 import { userModel } from '../models/User.js';
 import { v4 as uuidv4 } from 'uuid';
-import webpush from 'web-push';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
-import env from '../config/env.js';
-import { sendEmail } from '../utils/sendEmail.js';
 import { notificationModel } from '../models/Notifications.js';
 
-// Environment variables
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
-
-// Reused from notificationController.js
-const generateNotificationEmail = (userName, title, body, url) => {
-  const sanitizedUserName = sanitizeHtml(userName);
-  const sanitizedTitle = sanitizeHtml(title);
-  const sanitizedBody = sanitizeHtml(body);
-
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>BeiFity Notification</title>
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
-        <tr>
-          <td align="center">
-            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
-              <tr>
-                <td>
-                  <img src="${FRONTEND_URL}/assets/logo-without-Dr_6ibJh.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">${sanitizedTitle}</h2>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">New Notification, ${sanitizedUserName}!</p>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                    Hi ${sanitizedUserName}, you have a new notification from <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>: ${sanitizedBody}
-                  </p>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <a href="${FRONTEND_URL}${url}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Take Action</a>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Need Help?</strong> Contact our support team via the dashboard.
-                  </p>
-                </td>
-              </tr>
-              <tr>
-                <td style="margin-top: 30px;">
-                  <p style="font-size: 14px; color: #64748b; margin: 0;">Stay connected with BeiFity!</p>
-                  <span style="color: #1e40af; font-weight: 600; font-size: 14px; font-weight: 700;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </body>
-    </html>
-  `;
-};
-
-// Extended notification URL helper
-const getNotificationUrl = (type, productId, notificationId) => {
-  switch (type.toLowerCase()) {
-    case 'listing_created':
-    case 'listing_verified':
-    case 'listing_rejected':
-    case 'listing_sold':
-    case 'listing_unsold':
-    case 'listing_promoted':
-    case 'listing_review':
-    case 'listing_inquiry':
-    case 'listing_negotiation':
-    case 'listing_low_stock':
-      return `/dashboard/listings/${productId}`;
-    case 'listing_cart_add':
-    case 'listing_wishlist_add':
-      return `/product/${productId}`;
-    case 'guest_data_transferred':
-      return '/dashboard/cart';
-    case 'admin_pending_listing':
-      return '/admin/listings/pending';
-    default:
-      return '/notifications';
-  }
-};
-
-// Helper to send notification (simplified from notificationController.js)
+// Helper to send notification
 export const sendListingNotification = async (
   userId,
   type,
@@ -132,69 +32,6 @@ export const sendListingNotification = async (
     });
     await notification.save({ session });
 
-    // Update analytics
-    await userModel.updateOne(
-      { _id: userId },
-      { $inc: { 'analytics.notificationsReceived': 1 } },
-      { session }
-    );
-    if (senderId) {
-      await userModel.updateOne(
-        { _id: senderId },
-        { $inc: { 'analytics.notificationsSent': 1 } },
-        { session }
-      );
-    }
-
-    // Prepare push notification
-    let pushSent = false;
-    if (user.pushSubscription) {
-      const payload = JSON.stringify({
-        title: type.startsWith('listing_') ? 'BeiFity Listing Update' : 'BeiFity.Com',
-        body: sanitizeHtml(content),
-        icon: `${FRONTEND_URL}/assets/notification-icon.png`,
-        badge: `${FRONTEND_URL}/assets/notification-badge.png`,
-        vibrate: [200, 100, 200],
-        timestamp: Date.now(),
-        actions: [
-          { action: 'view', title: 'View' },
-          { action: 'dismiss', title: 'Dismiss' },
-        ],
-        data: {
-          url: getNotificationUrl(type, productId, notification._id),
-          notificationId: notification._id,
-        },
-      });
-
-      try {
-        await webpush.sendNotification(user.pushSubscription, payload);
-        pushSent = true;
-        logger.info(`Push notification sent to user ${userId}`, { notificationId: notification._id, type });
-      } catch (pushError) {
-        logger.warn(`Failed to send push notification to user ${userId}: ${pushError.message}`, { notificationId: notification._id, type });
-      }
-    }
-
-    // Fallback to email
-    if (!pushSent && user.personalInfo.email && user.preferences.emailNotifications) {
-      const emailContent = generateNotificationEmail(
-        user.personalInfo.fullname || 'User',
-        `BeiFity ${type.replace('listing_', '').replace('_', ' ').toUpperCase()} Notification`,
-        content,
-        getNotificationUrl(type, productId, notification._id)
-      );
-      const emailSent = await sendEmail(
-        user.personalInfo.email,
-        `BeiFity Notification - ${type.replace('listing_', '').replace('_', ' ')}`,
-        emailContent
-      );
-      if (emailSent) {
-        logger.info(`Fallback email notification sent to user ${userId}`, { notificationId: notification._id, type });
-      } else {
-        logger.warn(`Failed to send fallback email to user ${userId}`, { notificationId: notification._id, type });
-      }
-    }
-
     return true;
   } catch (error) {
     logger.error(`Error sending notification: ${error.message}`, { stack: error.stack, userId, type, productId });
@@ -202,7 +39,7 @@ export const sendListingNotification = async (
   }
 };
 
-
+// Add Listing
 export const addListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -232,22 +69,14 @@ export const addListing = async (req, res) => {
       logger.warn(`Add listing failed: Invalid or too many images`, { userId, imageCount: productInfo.images?.length });
       return res.status(400).json({
         success: false,
-        message: `Images must be an array with up to ${productInfo.images?.length} items`,
+        message: `Images must be an array with up to 5 items`,
       });
     }
-
 
     // Validate inventory
     if (typeof inventory !== 'number' || inventory < 1) {
       logger.warn('Add listing failed: Invalid inventory', { userId, inventory });
       return res.status(400).json({ success: false, message: 'Inventory must be a positive number' });
-    }
-
-    // Mock payment validation
-    const paymentConfirmed = true; // Replace with Stripe/PayPal
-    if (!paymentConfirmed) {
-      logger.warn('Add listing failed: Payment not confirmed', { userId });
-      return res.status(402).json({ success: false, message: 'Payment required to list product' });
     }
 
     const productId = uuidv4();
@@ -259,6 +88,16 @@ export const addListing = async (req, res) => {
         description: sanitizeHtml(productInfo.description?.trim() || ''),
         price: Number(productInfo.price),
         images: productInfo?.images || [],
+        category: productInfo?.category || '',
+        subCategory: productInfo?.subCategory || '',
+        tags: productInfo?.tags || [],
+        sizes: productInfo?.sizes || [],
+        colors: productInfo?.colors || [],
+        usageDuration: productInfo?.usageDuration || 'Brand New (0-1 months)',
+        condition: productInfo?.condition || 'New',
+        brand: productInfo?.brand || '',
+        model: productInfo?.model || '',
+        warranty: productInfo?.warranty || 'No Warranty',
       },
       seller: {
         sellerId: req.user._id,
@@ -270,7 +109,7 @@ export const addListing = async (req, res) => {
       reviews: [],
       negotiable: Boolean(negotiable),
       verified: 'Pending',
-      location: sanitizeHtml(location?.trim() || req.user.personalInfo?.location || 'Kenya'),
+      location: sanitizeHtml(location?.trim() || 'Kenya'),
       isSold: false,
       AgreedToTerms: Boolean(AgreedToTerms),
       featured: Boolean(featured),
@@ -286,16 +125,16 @@ export const addListing = async (req, res) => {
       req.user._id,
       {
         $push: { listings: listing._id },
-        $inc: { 'stats.activeListingsCount': 1, 'stats.listingFeesPaid': featured ? 10 : 5 },
+        $inc: { 'stats.activeListingsCount': 1 },
       },
       { session }
     );
 
-    // // Notify seller
+    // Notify seller
     await sendListingNotification(
       userId,
       'listing_created',
-      `Your listing "${listingData.productInfo.name}" with ${productInfo?.images?.length || 0} image(s) has been created and is pending verification.`,
+      `Your listing "${listingData.productInfo.name}" has been created and is pending verification.`,
       productId,
       null,
       session
@@ -307,7 +146,7 @@ export const addListing = async (req, res) => {
       await sendListingNotification(
         admin._id,
         'admin_pending_listing',
-        `A new listing "${listingData.productInfo.name}" by ${admin.personalInfo.fullname} is pending verification.`,
+        `A new listing "${listingData.productInfo.name}" by ${req.user.personalInfo.fullname} is pending verification.`,
         productId,
         req.user._id,
         session
@@ -315,7 +154,7 @@ export const addListing = async (req, res) => {
     }
 
     await session.commitTransaction();
-    logger.info(`Listing created with ${productInfo.images?.length || 0} images by user ${userId}: ${productId}`);
+    logger.info(`Listing created by user ${userId}: ${productId}`);
     res.status(201).json({
       success: true,
       message: 'Listing created, pending verification',
@@ -324,18 +163,13 @@ export const addListing = async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     logger.error(`Error adding listing: ${error.message}`, { stack: error.stack, userId: req.user?._id });
-    console.error(error);
     res.status(500).json({ success: false, message: 'Failed to add listing' });
   } finally {
     session.endSession();
   }
 };
-/**
- * Verify Listing (Admin Only)
- * @route PUT /api/listings/:productId/verify
- * @desc Admin verifies or rejects a listing with notification to seller
- * @access Private (admin only)
- */
+
+// Verify Listing (Admin Only)
 export const verifyListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -400,12 +234,7 @@ export const verifyListing = async (req, res) => {
   }
 };
 
-/**
- * Mark Listing as Sold
- * @route PUT /api/listings/:productId/sold
- * @desc Mark a listing as sold with notification to seller
- * @access Private (requires JWT token)
- */
+// Mark Listing as Sold
 export const markAsSold = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -484,12 +313,7 @@ export const markAsSold = async (req, res) => {
   }
 };
 
-/**
- * Add Review to Listing
- * @route POST /api/listings/:productId/reviews
- * @desc Add a review with notification to seller
- * @access Private (requires JWT token)
- */
+// Add Review to Listing
 export const addReview = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -537,8 +361,6 @@ export const addReview = async (req, res) => {
     };
 
     listing.reviews.push(review);
-    const totalRatings = listing.reviews.reduce((sum, rev) => sum + rev.rating, 0);
-    listing.rating = (totalRatings / listing.reviews.length).toFixed(1);
     await listing.save({ session });
 
     // Notify seller
@@ -567,12 +389,7 @@ export const addReview = async (req, res) => {
   }
 };
 
-/**
- * Record Inquiry
- * @route POST /api/listings/:productId/inquiry
- * @desc Record an inquiry with notification to seller
- * @access Private (requires JWT token)
- */
+// Record Inquiry
 export const recordInquiry = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -589,19 +406,6 @@ export const recordInquiry = async (req, res) => {
     if (!listing || listing.verified !== 'Verified' || listing.isSold) {
       logger.warn(`Record inquiry failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
-    }
-
-    // Rate limiting: Check if user already inquired recently
-    const recentInquiry = await NotificationModel.findOne({
-      userId: listing.seller.sellerId,
-      type: 'listing_inquiry',
-      'data.productId': productId,
-      sender: userId,
-      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-    });
-    if (recentInquiry) {
-      logger.warn(`Record inquiry failed: User ${userId} already inquired recently`, { productId });
-      return res.status(429).json({ success: false, message: 'You have already sent an inquiry recently' });
     }
 
     listing.analytics.inquiries = (listing.analytics.inquiries || 0) + 1;
@@ -629,12 +433,7 @@ export const recordInquiry = async (req, res) => {
   }
 };
 
-/**
- * Add to Cart (Analytics Tracking)
- * @route POST /api/listings/:productId/cart
- * @desc Add to cart with notification to seller for trending items
- * @access Private (requires JWT token for users, optional for guests)
- */
+// Add to Cart (Analytics Tracking)
 export const addToCart = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -666,18 +465,6 @@ export const addToCart = async (req, res) => {
         { $inc: { 'analytics.cartAdditions': 1 } },
         { session }
       );
-
-      // Notify seller if cart additions exceed threshold (e.g., 5)
-      if (listing.analytics.cartAdditions.total >= 5) {
-        await sendListingNotification(
-          listing.seller.sellerId,
-          'listing_cart_add',
-          `Your listing "${listing.productInfo.name}" is trending! It has been added to ${listing.analytics.cartAdditions.total} carts.`,
-          productId,
-          userId,
-          session
-        );
-      }
 
       await session.commitTransaction();
       logger.info(`Listing ${productId} added to cart by user ${userId}`);
@@ -713,26 +500,24 @@ export const addToCart = async (req, res) => {
   }
 };
 
-/**
- * Remove from Wishlist
- * @route DELETE /api/listings/:productId/wishlist
- * @desc Remove a listing from wishlist
- * @access Private (requires JWT token for users, optional for guests)
- */
+
+// Remove from Wishlist
 export const removeFromWishlist = async (req, res) => {
   try {
     const { productId } = req.params;
     const { userId, guestId } = req.body;
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
-    if (!listing || listing.verified !== 'Verified' || listing.isSold)
+    if (!listing || listing.verified !== 'Verified' || listing.isSold) {
+      logger.warn(`Remove from wishlist failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
+    }
 
     if (userId) {
-      // if (req.user._id.toString() !== userId)
-      //   return res.status(403).json({ success: false, message: 'Unauthorized' });
-      if (!listing.analytics.wishlist.userIds.includes(userId))
+      if (!listing.analytics.wishlist.userIds.includes(userId)) {
+        logger.warn(`Remove from wishlist failed: Listing ${productId} not in wishlist for user ${userId}`);
         return res.status(400).json({ success: false, message: 'Not in wishlist' });
+      }
 
       listing.analytics.wishlist.userIds.pull(userId);
       listing.analytics.wishlist.total = Math.max(0, (listing.analytics.wishlist.total || 0) - 1);
@@ -746,8 +531,10 @@ export const removeFromWishlist = async (req, res) => {
     }
 
     if (guestId) {
-      if (!listing.analytics.wishlist.guestIds.includes(guestId))
+      if (!listing.analytics.wishlist.guestIds.includes(guestId)) {
+        logger.warn(`Remove from wishlist failed: Listing ${productId} not in wishlist for guest ${guestId}`);
         return res.status(400).json({ success: false, message: 'Not in wishlist (guest)' });
+      }
 
       listing.analytics.wishlist.guestIds.pull(guestId);
       listing.analytics.wishlist.total = Math.max(0, (listing.analytics.wishlist.total || 0) - 1);
@@ -767,12 +554,7 @@ export const removeFromWishlist = async (req, res) => {
   }
 };
 
-/**
- * Add to Wishlist
- * @route POST /api/listings/:productId/wishlist
- * @desc Add to wishlist with notification to seller for trending items
- * @access Private (requires JWT token for users, optional for guests)
- */
+// Add to Wishlist
 export const addToWishlist = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -787,7 +569,10 @@ export const addToWishlist = async (req, res) => {
     }
 
     if (userId) {
-     
+      if (req.user._id.toString() !== userId) {
+        logger.warn(`Add to wishlist failed: User ${req.user._id} attempted to add as ${userId}`);
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
       if (listing.analytics.wishlist.userIds.includes(userId)) {
         logger.debug(`Add to wishlist skipped: Listing ${productId} already in wishlist for user ${userId}`);
         return res.status(200).json({ success: true, message: 'Already in wishlist' });
@@ -806,18 +591,6 @@ export const addToWishlist = async (req, res) => {
         { $inc: { 'analytics.wishlistCount': 1 } },
         { session }
       );
-
-      // Notify seller if wishlist additions exceed threshold (e.g., 5)
-      if (listing.analytics.wishlist.total >= 5) {
-        await sendListingNotification(
-          listing.seller.sellerId,
-          'listing_wishlist_add',
-          `Your listing "${listing.productInfo.name}" is popular! It has been added to ${listing.analytics.wishlist.total} wishlists.`,
-          productId,
-          userId,
-          session
-        );
-      }
 
       await session.commitTransaction();
       logger.info(`Listing ${productId} added to wishlist by user ${userId}`);
@@ -848,19 +621,14 @@ export const addToWishlist = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Both userId and guestId are missing' });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack });
+    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack, productId, userId, guestId });
     res.status(500).json({ success: false, message: 'Failed to add to wishlist' });
   } finally {
     session.endSession();
   }
 };
 
-/**
- * Update Inventory
- * @route PUT /api/listings/:productId/inventory
- * @desc Update listing inventory with low stock or out of stock notification
- * @access Private (requires JWT token)
- */
+// Update Inventory
 export const updateInventory = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -944,20 +712,31 @@ export const updateInventory = async (req, res) => {
   }
 };
 
-// Other endpoints with notifications (summarized for brevity)
+// Mark Listing as Unsold
 export const markAsUnSold = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Mark as unsold failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
-    if (listing.seller.sellerId.toString() !== userId)
+    if (!listing) {
+      logger.warn(`Mark as unsold failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+    if (listing.seller.sellerId.toString() !== userId) {
+      logger.warn(`Mark as unsold failed: User ${userId} not authorized`, { productId });
       return res.status(403).json({ success: false, message: 'Unauthorized' });
-    if (!listing.isSold) return res.status(400).json({ success: false, message: 'Listing already unsold' });
+    }
+    if (!listing.isSold) {
+      logger.warn(`Mark as unsold failed: Listing ${productId} already unsold`);
+      return res.status(400).json({ success: false, message: 'Listing already unsold' });
+    }
 
     listing.isSold = false;
     await listing.save({ session });
@@ -971,7 +750,7 @@ export const markAsUnSold = async (req, res) => {
           'analytics.totalSales.amount': -listing.productInfo.price,
           'analytics.salesCount': -1,
         },
-        $pull: { 'analytics.totalSales.history': { amount: listing.productInfo.price, listingId: listing._id } },
+        $pull: { 'analytics.totalSales.history': { listingId: listing._id } },
       },
       { session }
     );
@@ -993,41 +772,42 @@ export const markAsUnSold = async (req, res) => {
     logger.error(`Error marking listing as unsold: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
     res.status(500).json({ success: false, message: 'Failed to mark listing as unsold' });
   } finally {
-    session.endSession();
+    session.end同一个Session();
   }
 };
 
+// Promote Listing
 export const promoteListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Promote listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { productId } = req.params;
     const { duration } = req.body;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
-    if (listing.seller.sellerId.toString() !== userId)
+    if (!listing) {
+      logger.warn(`Promote listing failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+    if (listing.seller.sellerId.toString() !== userId) {
+      logger.warn(`Promote listing failed: User ${userId} not authorized`, { productId });
       return res.status(403).json({ success: false, message: 'Unauthorized' });
-
-    const paymentConfirmed = true; // Replace with Stripe/PayPal
-    if (!paymentConfirmed)
-      return res.status(402).json({ success: false, message: 'Payment required to promote listing' });
+    }
 
     const promotionDays = Number(duration) || 30;
-    if (promotionDays < 1)
+    if (promotionDays < 1) {
+      logger.warn(`Promote listing failed: Invalid duration ${promotionDays}`, { productId });
       return res.status(400).json({ success: false, message: 'Duration must be a positive number' });
+    }
 
     listing.featured = true;
     listing.promotedUntil = new Date(Date.now() + promotionDays * 24 * 60 * 60 * 1000);
     await listing.save({ session });
-
-    await userModel.findByIdAndUpdate(
-      listing.seller.sellerId,
-      { $inc: { 'stats.listingFeesPaid': promotionDays * 0.5 } },
-      { session }
-    );
 
     await sendListingNotification(
       userId,
@@ -1050,19 +830,27 @@ export const promoteListing = async (req, res) => {
   }
 };
 
+// Record Negotiation
 export const recordNegotiation = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Record negotiation failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
-    if (!listing || listing.verified !== 'Verified' || listing.isSold)
+    if (!listing || listing.verified !== 'Verified' || listing.isSold) {
+      logger.warn(`Record negotiation failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
-    if (!listing.negotiable)
+    }
+    if (!listing.negotiable) {
+      logger.warn(`Record negotiation failed: Listing ${productId} is not negotiable`);
       return res.status(400).json({ success: false, message: 'This listing is not negotiable' });
+    }
 
     listing.analytics.negotiationAttempts = (listing.analytics.negotiationAttempts || 0) + 1;
     await listing.save({ session });
@@ -1088,16 +876,24 @@ export const recordNegotiation = async (req, res) => {
   }
 };
 
+// Transfer Guest Data
 export const transferGuestData = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Transfer guest data failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { userId, guestId, cart, favorites } = req.body;
-    if (req.user._id.toString() !== userId)
+    if (req.user._id.toString() !== userId) {
+      logger.warn(`Transfer guest data failed: User ${req.user._id} attempted to transfer as ${userId}`);
       return res.status(403).json({ success: false, message: 'Unauthorized' });
-    if (!guestId || (!cart?.length && !favorites?.length))
+    }
+    if (!guestId || (!cart?.length && !favorites?.length)) {
+      logger.warn('Transfer guest data failed: Guest ID and cart or favorites required', { userId });
       return res.status(400).json({ success: false, message: 'Guest ID and cart or favorites required' });
+    }
 
     for (const item of cart || []) {
       const listing = await listingModel.findOne({ 'productInfo.productId': item.productId }).session(session);
@@ -1139,7 +935,7 @@ export const transferGuestData = async (req, res) => {
   }
 };
 
-// Remaining endpoints (unchanged or minor notification additions)
+// Get Listings
 export const getListings = async (req, res) => {
   try {
     const listings = await listingModel
@@ -1154,6 +950,7 @@ export const getListings = async (req, res) => {
   }
 };
 
+// Get Listing by ID
 export const getListingById = async (req, res) => {
   try {
     const { productId } = req.params;
@@ -1174,11 +971,7 @@ export const getListingById = async (req, res) => {
   }
 };
 
-/**
- * Update Listing
- * @route PUT /api/listings/:productId
- * @desc Update a listing, including adding/removing pre-uploaded images
- */
+// Update Listing
 export const updateListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1189,7 +982,7 @@ export const updateListing = async (req, res) => {
     }
 
     const { productId } = req.params;
-    const { productInfo, negotiable, location, inventory, shippingOptions, sellerNotes, images, removeImageIds } = req.body;
+    const { productInfo, negotiable, location, inventory, shippingOptions, sellerNotes } = req.body;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
@@ -1211,7 +1004,17 @@ export const updateListing = async (req, res) => {
         description: sanitizeHtml(productInfo.description?.trim() || listing.productInfo.description),
         price: Number(productInfo.price) || listing.productInfo.price,
         productId: listing.productInfo.productId,
-        images: listing.productInfo.images || [],
+        images: productInfo.images || listing.productInfo.images,
+        category: productInfo.category || listing.productInfo.category,
+        subCategory: productInfo.subCategory || listing.productInfo.subCategory,
+        tags: productInfo.tags || listing.productInfo.tags,
+        sizes: productInfo.sizes || listing.productInfo.sizes,
+        colors: productInfo.colors || listing.productInfo.colors,
+        usageDuration: productInfo.usageDuration || listing.productInfo.usageDuration,
+        condition: productInfo.condition || listing.productInfo.condition,
+        brand: productInfo.brand || listing.productInfo.brand,
+        model: productInfo.model || listing.productInfo.model,
+        warranty: productInfo.warranty || listing.productInfo.warranty,
       };
     }
     if (negotiable !== undefined) updateData.negotiable = Boolean(negotiable);
@@ -1223,47 +1026,6 @@ export const updateListing = async (req, res) => {
     if (shippingOptions) updateData.shippingOptions = shippingOptions;
     if (sellerNotes !== undefined) updateData['seller.sellerNotes'] = sanitizeHtml(sellerNotes.trim());
     updateData.updatedAt = new Date();
-
-    let imagesAdded = 0;
-    let imagesDeleted = 0;
-
-    // Handle new images
-    if (images && Array.isArray(images)) {
-      const currentImageCount = updateData.productInfo.images.length;
-      if (currentImageCount + images.length > MAX_IMAGES_PER_LISTING) {
-        logger.warn(`Update listing failed: Too many images`, { productId, userId, imageCount: currentImageCount + images.length });
-        return res.status(400).json({
-          success: false,
-          message: `Cannot add ${images.length} images. Maximum ${MAX_IMAGES_PER_LISTING} images allowed.`,
-        });
-      }
-
-      for (const image of images) {
-        if (!image.url || !image.public_id) {
-          logger.warn('Update listing failed: Invalid image format', { userId, productId });
-          return res.status(400).json({ success: false, message: 'Each image must include url and public_id' });
-        }
-        if (!image.public_id.startsWith(`beifity/users/${userId}/uploads`) && !req.user.personalInfo.isAdmin) {
-          logger.warn(`Update listing failed: Image ${image.public_id} not owned by user`, { userId, productId });
-          return res.status(403).json({ success: false, message: 'Unauthorized to use this image' });
-        }
-        updateData.productInfo.images.push(image);
-        imagesAdded++;
-      }
-    }
-
-    // Handle image deletions
-    if (removeImageIds && Array.isArray(removeImageIds)) {
-      for (const public_id of removeImageIds) {
-        const imageIndex = updateData.productInfo.images.findIndex((img) => img.public_id === public_id);
-        if (imageIndex === -1) {
-          logger.warn(`Update listing failed: Image ${public_id} not found`, { productId, userId });
-          continue;
-        }
-        updateData.productInfo.images.splice(imageIndex, 1);
-        imagesDeleted++;
-      }
-    }
 
     const updatedListing = await listingModel.findOneAndUpdate(
       { 'productInfo.productId': productId },
@@ -1291,42 +1053,8 @@ export const updateListing = async (req, res) => {
       );
     }
 
-    // Update user analytics for images
-    if (imagesAdded > 0 || imagesDeleted > 0) {
-      await userModel.findByIdAndUpdate(
-        userId,
-        {
-          $inc: {
-            'analytics.imagesUploaded': imagesAdded,
-            'analytics.imagesDeleted': imagesDeleted,
-          },
-        },
-        { session }
-      );
-    }
-
-    // Notify seller if images were modified
-    if (imagesAdded > 0 || imagesDeleted > 0) {
-      const notificationMessage = [
-        imagesAdded > 0 ? `Added ${imagesAdded} image(s)` : '',
-        imagesDeleted > 0 ? `Removed ${imagesDeleted} image(s)` : '',
-      ]
-        .filter(Boolean)
-        .join(' and ')
-        .concat(` for your listing "${listing.productInfo.name}".`);
-
-      await sendListingNotification(
-        userId,
-        imagesAdded > 0 ? 'listing_image_added' : 'listing_image_removed',
-        notificationMessage,
-        productId,
-        userId,
-        session
-      );
-    }
-
     await session.commitTransaction();
-    logger.info(`Listing updated: ${productId} by user ${userId}, images added: ${imagesAdded}, deleted: ${imagesDeleted}`);
+    logger.info(`Listing updated: ${productId} by user ${userId}`);
     res.status(200).json({
       success: true,
       message: 'Listing updated successfully',
@@ -1334,27 +1062,32 @@ export const updateListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error updating listing: ${error.message}`, {
-      stack: error.stack,
-      productId,
-      userId: req.user?._id,
-    });
+    logger.error(`Error updating listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
     res.status(500).json({ success: false, message: 'Failed to update listing' });
   } finally {
     session.endSession();
   }
 };
 
+// Delete Listing
 export const deleteListing = async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Delete listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
-    if (listing.seller.sellerId.toString() !== userId)
+    if (!listing) {
+      logger.warn(`Delete listing failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+    if (listing.seller.sellerId.toString() !== userId) {
+      logger.warn(`Delete listing failed: User ${userId} not authorized`, { productId });
       return res.status(403).json({ success: false, message: 'Unauthorized to delete this listing' });
+    }
 
     await userModel.findByIdAndUpdate(listing.seller.sellerId, {
       $pull: { listings: listing._id },
@@ -1371,16 +1104,22 @@ export const deleteListing = async (req, res) => {
   }
 };
 
+// Update Views
 export const updateViews = async (req, res) => {
   try {
     const { productId } = req.params;
     const { viewerId } = req.body;
 
-    if (!viewerId) return res.status(400).json({ success: false, message: 'Viewer ID required' });
+    if (!viewerId) {
+      logger.warn('Update views failed: Viewer ID required', { productId });
+      return res.status(400).json({ success: false, message: 'Viewer ID required' });
+    }
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
-    if (!listing || listing.verified !== 'Verified' || listing.isSold)
+    if (!listing || listing.verified !== 'Verified' || listing.isSold) {
+      logger.warn(`Update views failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
+    }
     if (listing.analytics.views.uniqueViewers.includes(viewerId)) {
       logger.debug(`View already recorded for viewer ${viewerId} on listing ${productId}`);
       return res.status(200).json({ success: true, message: 'View already recorded' });
@@ -1400,20 +1139,27 @@ export const updateViews = async (req, res) => {
   }
 };
 
-export const removeToCart = async (req, res) => {
+// Remove from Cart
+export const removeFromCart = async (req, res) => {
   try {
     const { productId } = req.params;
     const { userId, guestId } = req.body;
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
-    if (!listing || listing.verified !== 'Verified' || listing.isSold || listing.inventory <= 0)
+    if (!listing || listing.verified !== 'Verified' || listing.isSold || listing.inventory <= 0) {
+      logger.warn(`Remove from cart failed: Listing ${productId} not available`);
       return res.status(404).json({ success: false, message: 'Listing not available' });
+    }
 
     if (req.user && userId) {
-      if (req.user._id.toString() !== userId)
+      if (req.user._id.toString() !== userId) {
+        logger.warn(`Remove from cart failed: User ${req.user._id} attempted to remove as ${userId}`);
         return res.status(403).json({ success: false, message: 'Unauthorized' });
-      if (!listing.analytics.cartAdditions.userIds.includes(userId))
+      }
+      if (!listing.analytics.cartAdditions.userIds.includes(userId)) {
+        logger.warn(`Remove from cart failed: Listing ${productId} not in cart for user ${userId}`);
         return res.status(400).json({ success: false, message: 'Not in cart' });
+      }
 
       listing.analytics.cartAdditions.userIds.pull(userId);
       listing.analytics.cartAdditions.total = Math.max(0, (listing.analytics.cartAdditions.total || 0) - 1);
@@ -1424,8 +1170,10 @@ export const removeToCart = async (req, res) => {
       logger.info(`Listing ${productId} removed from cart by user ${userId}`);
       res.status(200).json({ success: true, message: 'Removed from cart successfully' });
     } else if (guestId) {
-      if (!listing.analytics.cartAdditions.guestIds.includes(guestId))
+      if (!listing.analytics.cartAdditions.guestIds.includes(guestId)) {
+        logger.warn(`Remove from cart failed: Listing ${productId} not in cart for guest ${guestId}`);
         return res.status(400).json({ success: false, message: 'Not in cart (guest)' });
+      }
 
       listing.analytics.cartAdditions.guestIds.pull(guestId);
       listing.analytics.cartAdditions.total = Math.max(0, (listing.analytics.cartAdditions.total || 0) - 1);
@@ -1445,17 +1193,22 @@ export const removeToCart = async (req, res) => {
   }
 };
 
-
+// Share Listing
 export const shareListing = async (req, res) => {
   try {
     const { productId } = req.params;
     const { platform } = req.body;
 
-    if (!platform) return res.status(400).json({ success: false, message: 'Platform required' });
+    if (!platform) {
+      logger.warn('Share listing failed: Platform required', { productId });
+      return res.status(400).json({ success: false, message: 'Platform required' });
+    }
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
-    if (!listing || listing.verified !== 'Verified' || listing.isSold)
+    if (!listing || listing.verified !== 'Verified' || listing.isSold) {
+      logger.warn(`Share listing failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
+    }
 
     const currentShares = listing.analytics.shared?.platforms?.[platform] || 0;
     listing.analytics.shared = {
@@ -1479,20 +1232,29 @@ export const shareListing = async (req, res) => {
   }
 };
 
+// Feature Listing (Admin Only)
 export const featureListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
-    if (!req.user.personalInfo?.isAdmin)
+    if (!req.user) {
+      logger.warn('Feature listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    if (!req.user.personalInfo?.isAdmin) {
+      logger.warn(`Feature listing failed: User ${req.user._id} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
 
     const { productId } = req.params;
     const { featured } = req.body;
     const adminId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (!listing) {
+      logger.warn(`Feature listing failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
 
     listing.featured = Boolean(featured);
     listing.promotedUntil = featured ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
@@ -1523,24 +1285,35 @@ export const featureListing = async (req, res) => {
   }
 };
 
+// Update Response Time (Admin Only)
 export const updateResponseTime = async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
-    if (!req.user.personalInfo?.isAdmin)
+    if (!req.user) {
+      logger.warn('Update response time failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    if (!req.user.personalInfo?.isAdmin) {
+      logger.warn(`Update response time failed: User ${req.user._id} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
 
     const { productId } = req.params;
     const { responseTime } = req.body;
 
-    if (typeof responseTime !== 'number' || responseTime < 0)
+    if (typeof responseTime !== 'number' || responseTime < 0) {
+      logger.warn(`Update response time failed: Invalid response time ${responseTime}`, { productId });
       return res.status(400).json({ success: false, message: 'Response time must be a non-negative number' });
+    }
 
     const listing = await listingModel.findOneAndUpdate(
       { 'productInfo.productId': productId },
       { 'seller.responseTime': responseTime },
       { new: true }
     );
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (!listing) {
+      logger.warn(`Update response time failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
 
     const sellerListings = await listingModel.find({ 'seller.sellerId': listing.seller.sellerId });
     const totalResponseTime = sellerListings.reduce((sum, l) => sum + l.seller.responseTime, 0);
@@ -1556,24 +1329,35 @@ export const updateResponseTime = async (req, res) => {
   }
 };
 
+// Update Acceptance Rate (Admin Only)
 export const updateAcceptanceRate = async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
-    if (!req.user.personalInfo?.isAdmin)
+    if (!req.user) {
+      logger.warn('Update acceptance rate failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    if (!req.user.personalInfo?.isAdmin) {
+      logger.warn(`Update acceptance rate failed: User ${req.user._id} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
 
     const { productId } = req.params;
     const { acceptanceRate } = req.body;
 
-    if (typeof acceptanceRate !== 'number' || acceptanceRate < 0 || acceptanceRate > 100)
+    if (typeof acceptanceRate !== 'number' || acceptanceRate < 0 || acceptanceRate > 100) {
+      logger.warn(`Update acceptance rate failed: Invalid acceptance rate ${acceptanceRate}`, { productId });
       return res.status(400).json({ success: false, message: 'Acceptance rate must be between 0 and 100' });
+    }
 
     const listing = await listingModel.findOneAndUpdate(
       { 'productInfo.productId': productId },
       { 'seller.acceptanceRate': acceptanceRate },
       { new: true }
     );
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (!listing) {
+      logger.warn(`Update acceptance rate failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
 
     logger.info(`Acceptance rate updated for listing ${productId} by admin ${req.user._id}`);
     res.status(200).json({ success: true, message: 'Acceptance rate updated', data: listing });
@@ -1583,24 +1367,35 @@ export const updateAcceptanceRate = async (req, res) => {
   }
 };
 
+// Update Conversion Rate (Admin Only)
 export const updateConversionRate = async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
-    if (!req.user.personalInfo?.isAdmin)
+    if (!req.user) {
+      logger.warn('Update conversion rate failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    if (!req.user.personalInfo?.isAdmin) {
+      logger.warn(`Update conversion rate failed: User ${req.user._id} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
 
     const { productId } = req.params;
     const { conversionRate } = req.body;
 
-    if (typeof conversionRate !== 'number' || conversionRate < 0 || conversionRate > 100)
+    if (typeof conversionRate !== 'number' || conversionRate < 0 || conversionRate > 100) {
+      logger.warn(`Update conversion rate failed: Invalid conversion rate ${conversionRate}`, { productId });
       return res.status(400).json({ success: false, message: 'Conversion rate must be between 0 and 100' });
+    }
 
     const listing = await listingModel.findOneAndUpdate(
       { 'productInfo.productId': productId },
       { 'analytics.conversionRate': conversionRate },
       { new: true }
     );
-    if (!listing) return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (!listing) {
+      logger.warn(`Update conversion rate failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
 
     logger.info(`Conversion rate updated for listing ${productId} by admin ${req.user._id}`);
     res.status(200).json({ success: true, message: 'Conversion rate updated', data: listing });
@@ -1610,6 +1405,7 @@ export const updateConversionRate = async (req, res) => {
   }
 };
 
+// Get Seller Listings
 export const getSellerListings = async (req, res) => {
   try {
     const { sellerId } = req.params;
@@ -1617,8 +1413,10 @@ export const getSellerListings = async (req, res) => {
       .find({ 'seller.sellerId': sellerId, verified: 'Verified', isSold: false })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
-    if (!listings.length)
+    if (!listings.length) {
+      logger.warn(`No verified listings found for seller ${sellerId}`);
       return res.status(404).json({ success: false, message: 'No verified listings found for this seller' });
+    }
     logger.info(`Fetched ${listings.length} listings for seller ${sellerId}`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
@@ -1627,13 +1425,19 @@ export const getSellerListings = async (req, res) => {
   }
 };
 
+// Get Pending Listings (Admin Only)
 export const getPendingListings = async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!req.user) {
+      logger.warn('Get pending listings failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
     const adminId = req.user._id.toString();
     const admin = await userModel.findById(adminId);
-    if (!admin || !admin.personalInfo?.isAdmin)
+    if (!admin || !admin.personalInfo?.isAdmin) {
+      logger.warn(`Get pending listings failed: User ${adminId} not admin`);
       return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
 
     const listings = await listingModel
       .find({ verified: 'Pending' })
@@ -1647,6 +1451,7 @@ export const getPendingListings = async (req, res) => {
   }
 };
 
+// Get Featured Listings
 export const getFeaturedListings = async (req, res) => {
   try {
     const listings = await listingModel
@@ -1661,11 +1466,14 @@ export const getFeaturedListings = async (req, res) => {
   }
 };
 
+// Get Listings Near
 export const getListingsNear = async (req, res) => {
   try {
     const { lat, lng, maxDistance = 10000 } = req.query;
-    if (!lat || !lng)
+    if (!lat || !lng) {
+      logger.warn('Get listings near failed: Latitude and longitude required');
       return res.status(400).json({ success: false, message: 'Latitude and longitude required' });
+    }
 
     const listings = await listingModel
       .find({
