@@ -39,7 +39,7 @@ listingRouter.post('/:productId/share', shareListing);
 listingRouter.get('/sellerslistings/:sellerId', getSellerListings);
 listingRouter.get('/featured', getFeaturedListings);
 listingRouter.get('/near', getListingsNear);
-listingRouter.post("/transfer-guest-data", transferGuestData);
+listingRouter.post("/transfer-guest-data", authUser, transferGuestData);
 listingRouter.post('/:productId/wishlist/add',  addToWishlist);
 listingRouter.post('/:productId/wishlist/remove',  removeFromWishlist);
 listingRouter.post('/:productId/cart/add',  addToCart);
