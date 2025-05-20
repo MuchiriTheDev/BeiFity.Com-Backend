@@ -289,7 +289,7 @@ export const placeOrder = async (req, res) => {
         logger.warn(`Place order failed: Invalid sellerId ${item.sellerId}`, { userId: req.user._id, productId: item.productId });
         return res.status(400).json({ success: false, message: `Invalid sellerId: ${item.sellerId}` });
       }
-      const listing = await ListingModel.findOne({ 'productInfo.productId': item.productId }).session(session);
+      const listing = await  listingModel.findOne({ 'productInfo.productId': item.productId }).session(session);
       if (!listing || listing.verified !== 'Verified' || listing.isSold || listing.inventory < item.quantity) {
         logger.warn(`Place order failed: Listing ${item.productId} not found, not verified, sold, or insufficient inventory`, { userId: req.user._id });
         return res.status(400).json({ success: false, message: `Listing not available for productId: ${item.productId}` });
@@ -340,7 +340,7 @@ export const placeOrder = async (req, res) => {
 
     // Update sellers' and listings' analytics
     for (const item of data.items) {
-      await listingModel.updateOne(
+      await  listingModel.updateOne(
         { 'productInfo.productId': item.productId },
         {
           $inc: { 'analytics.ordersNumber': 1, inventory: -item.quantity },
@@ -633,7 +633,7 @@ export const updateOrderStatus = async (req, res) => {
     await order.save({ session });
 
     // Update analytics
-    const listing = await ListingModel.findOne({ 'productInfo.productId': productId }).session(session);
+    const listing = await  listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     const sellerUpdate = {};
     const buyerUpdate = {};
 
@@ -916,7 +916,7 @@ export const cancelOrderItem = async (req, res) => {
       { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
       { session }
     );
-    await ListingModel.updateOne(
+    await  listingModel.updateOne(
       { 'productInfo.productId': item.productId },
       { $inc: { 'analytics.ordersNumber': -1, inventory: item.quantity }, isSold: false },
       { session }
