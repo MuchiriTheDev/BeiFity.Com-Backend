@@ -255,7 +255,7 @@ export const placeOrder = async (req, res) => {
     }
 
     // Validate deliveryAddress
-    if (!data.deliveryAddress.email || !validator.isEmail(data.deliveryAddress.email)) {
+    if (!data.deliveryAddress.email) {
       logger.warn('Place order failed: Invalid email', { userId: req.user._id });
       return res.status(400).json({ success: false, message: 'Valid email required in delivery address' });
     }
