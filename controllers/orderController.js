@@ -299,7 +299,7 @@ export const placeOrder = async (req, res) => {
 
     // Generate order data
     const orderData = {
-      // Let Mongoose generate orderId via schema default
+      orderId: new mongoose.Types.ObjectId(),
       customerId: data.customerId,
       totalAmount: data.totalAmount,
       status: 'pending',
@@ -327,6 +327,7 @@ export const placeOrder = async (req, res) => {
     // Create and save the new order
     const newOrder = new orderModel(orderData);
     const savedOrder = await newOrder.save({ session });
+    console.log(savedOrder)
 
     // Update user's orders and analytics
     await userModel.updateOne(
