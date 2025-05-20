@@ -7,6 +7,7 @@ import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { createNotification } from './notificationController.js';
 import { orderModel } from '../models/Order.js';
+import { listingModel } from '../models/Listing.js';
 
 // Load environment variables
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
@@ -339,7 +340,7 @@ export const placeOrder = async (req, res) => {
 
     // Update sellers' and listings' analytics
     for (const item of data.items) {
-      await ListingModel.updateOne(
+      await listingModel.updateOne(
         { 'productInfo.productId': item.productId },
         {
           $inc: { 'analytics.ordersNumber': 1, inventory: -item.quantity },
