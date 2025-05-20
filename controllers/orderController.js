@@ -289,7 +289,7 @@ export const placeOrder = async (req, res) => {
         logger.warn(`Place order failed: Invalid sellerId ${item.sellerId}`, { userId: req.user._id, productId: item.productId });
         return res.status(400).json({ success: false, message: `Invalid sellerId: ${item.sellerId}` });
       }
-      const listing = await  listingModel.findOne({ 'productInfo.productId': item.productId }).session(session);
+      const listing = await listingModel.findOne({ 'productInfo.productId': item.productId }).session(session);
       if (!listing || listing.verified !== 'Verified' || listing.isSold || listing.inventory < item.quantity) {
         logger.warn(`Place order failed: Listing ${item.productId} not found, not verified, sold, or insufficient inventory`, { userId: req.user._id });
         return res.status(400).json({ success: false, message: `Listing not available for productId: ${item.productId}` });
