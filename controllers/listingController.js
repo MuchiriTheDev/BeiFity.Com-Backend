@@ -334,6 +334,7 @@ export const addReview = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Rating and comment are required' });
     }
 
+
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       logger.warn(`Add review failed: Invalid rating ${rating}`, { productId, userId });
       return res.status(400).json({ success: false, message: 'Rating must be an integer between 1 and 5' });
@@ -365,11 +366,13 @@ export const addReview = async (req, res) => {
     listing.reviews.push(review);
     await listing.save({ session });
 
+    const reviewer = await userModel.findById(userId).session(session);
+
     // Notify seller
     await sendListingNotification(
       listing.seller.sellerId,
       'listing_review',
-      `A new review (${rating}/5) was added to your listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      `A new review (${rating}/5) was added to your listing "${listing.productInfo.name}" by ${reviewer.personalInfo.fullname}.`,
       productId,
       userId,
       session
@@ -384,7 +387,7 @@ export const addReview = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding review: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error adding review: ${error.message}`, { stack: error.stack, userId: req.user?._id });
     res.status(500).json({ success: false, message: 'Failed to add review' });
   } finally {
     session.endSession();
