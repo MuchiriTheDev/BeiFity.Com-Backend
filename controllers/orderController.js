@@ -477,6 +477,7 @@ export const placeOrder = async (req, res) => {
       data: savedOrder,
     });
   } catch (error) {
+    console.error(error)
     await session.abortTransaction();
     if (error instanceof mongoose.Error.ValidationError) {
       logger.warn(`Place order failed: Validation error`, { error: error.errors, userId: req.user?._id });
