@@ -7,7 +7,7 @@ const orderRouter = express.Router();
 orderRouter.post('/place-order', authUser, placeOrder)
 orderRouter.post('/get-orders', authUser, getOrders)
 orderRouter.patch('/update-status', authUser, updateOrderStatus)
-orderRouter.post('/get-your-orders', getBuyerOrders)
+orderRouter.post('/get-your-orders', authUser ,getBuyerOrders)
 orderRouter.post('/cancel-item', authUser, cancelOrderItem);
 
 export default orderRouter;
