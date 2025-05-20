@@ -258,7 +258,7 @@ export const placeOrder = async (req, res) => {
       logger.warn('Place order failed: Invalid email', { userId: req.user._id });
       return res.status(400).json({ success: false, message: 'Valid email required in delivery address' });
     }
-    if (!data.deliveryAddress.phone || !validator.isMobilePhone(data.deliveryAddress.phone, 'any')) {
+    if (!data.deliveryAddress.phone.toString() || !validator.isMobilePhone(data.deliveryAddress.phone.toString(), 'any')) {
       logger.warn('Place order failed: Invalid phone', { userId: req.user._id });
       return res.status(400).json({ success: false, message: 'Valid phone number required in delivery address' });
     }
