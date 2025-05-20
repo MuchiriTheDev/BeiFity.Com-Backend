@@ -136,7 +136,7 @@ export const addListing = async (req, res) => {
       'listing_created',
       `Your listing "${listingData.productInfo.name}" has been created and is pending verification.`,
       productId,
-      null,
+      userId,
       session
     );
 
