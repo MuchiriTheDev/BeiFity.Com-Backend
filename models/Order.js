@@ -32,12 +32,16 @@ const itemSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'shipped', 'delivered', 'cancelled'], // Added 'cancelled'
+    enum: ['pending', 'shipped', 'delivered', 'cancelled'],
     default: 'pending',
   },
   cancelled: {
     type: Boolean,
-    default: false, // New field to explicitly track cancellation
+    default: false,
+  },
+  reportCount: { // New field
+    type: Number,
+    default: 0,
   },
 });
 
@@ -62,9 +66,9 @@ const deliveryAddressSchema = new mongoose.Schema({
 const orderSchema = new mongoose.Schema(
   {
     orderId: {
-      type: mongoose.Schema.Types.ObjectId, 
+      type: mongoose.Schema.Types.ObjectId,
       required: true,
-      unique: true, // Ensure uniqueness if orderId is a custom string
+      unique: true,
     },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -78,18 +82,23 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'shipped', 'delivered', 'cancelled'], // Added 'cancelled' at order level
+      enum: ['pending', 'shipped', 'delivered', 'cancelled'],
       default: 'pending',
     },
     items: [itemSchema],
     deliveryAddress: deliveryAddressSchema,
+    // New field for report tracking
+    reportCount: {
+      type: Number,
+      default: 0, // Number of reports filed against this order
+    },
   },
   {
     timestamps: true,
   }
 );
 
-// Pre-save hook to update totalAmount if items change
+// Pre-save hook (unchanged)
 orderSchema.pre('save', function (next) {
   if (this.isModified('items')) {
     this.totalAmount = this.items.reduce((sum, item) => {
@@ -98,5 +107,8 @@ orderSchema.pre('save', function (next) {
   }
   next();
 });
+
+// Index for report-related queries
+orderSchema.index({ reportCount: 1 });
 
 export const orderModel = mongoose.model('Order', orderSchema);

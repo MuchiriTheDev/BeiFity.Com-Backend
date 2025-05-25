@@ -128,6 +128,10 @@ const AnalyticsSchema = new mongoose.Schema({
       default: {},
     },
   },
+  reportsReceived: {
+    type: Number,
+    default: 0, // Number of reports filed against this listing
+  },
   inquiries: {
     type: Number,
     default: 0,

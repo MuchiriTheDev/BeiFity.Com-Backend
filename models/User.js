@@ -80,9 +80,10 @@ const UserSchema = new mongoose.Schema(
     pushSubscription: { type: Object },
     lastSeen: { type: Date, default: Date.now }, // Last active time
     // Analytics (detailed metrics for engagement and performance insights)
+      // Analytics (updated with report counters)
     analytics: {
       totalSales: {
-        amount: { type: Number, default: 0 }, // Total revenue from sales
+        amount: { type: Number, default: 0 },
         history: [
           {
             amount: { type: Number, required: true },
@@ -91,11 +92,11 @@ const UserSchema = new mongoose.Schema(
           },
         ],
       },
-      salesCount: { type: Number, default: 0 }, // Number of items sold
-      orderCount: { type: Number, default: 0 }, // Orders placed as a buyer
+      salesCount: { type: Number, default: 0 },
+      orderCount: { type: Number, default: 0 },
       profileViews: {
         total: { type: Number, default: 0 },
-        uniqueViewers: { type: [String], default: [] }, // IPs or user IDs
+        uniqueViewers: { type: [String], default: [] },
         history: [
           {
             viewerId: { type: String },
@@ -104,14 +105,17 @@ const UserSchema = new mongoose.Schema(
         ],
       },
       lastActive: { type: Date, default: Date.now },
-      listingViews: { type: Number, default: 0 }, // Total views across all listings
-      wishlistCount: { type: Number, default: 0 }, // Times user’s listings were wishlisted
-      cartAdditions: { type: Number, default: 0 }, // Times user’s listings were added to carts
+      listingViews: { type: Number, default: 0 },
+      wishlistCount: { type: Number, default: 0 },
+      cartAdditions: { type: Number, default: 0 },
       shares: {
         total: { type: Number, default: 0 },
-        platforms: { type: Map, of: Number, default: () => new Map() }, // e.g., { facebook: 5 }
+        platforms: { type: Map, of: Number, default: () => new Map() },
       },
-      responseTimeAvg: { type: Number, default: 0 }, // Average response time in minutes
+      responseTimeAvg: { type: Number, default: 0 },
+      // New fields for reporting
+      reportsSubmitted: { type: Number, default: 0 }, // Number of reports filed by this user
+      reportsReceived: { type: Number, default: 0 }, // Number of reports filed against this user
     },
 
     // Rating (user reputation summary)
@@ -179,7 +183,7 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Pre-save hooks
+// Pre-save hooks (unchanged, but ensuring analytics updates are safe)
 UserSchema.pre('save', function (next) {
   // Update rating based on reviews
   if (this.isModified('reviews')) {
@@ -189,7 +193,7 @@ UserSchema.pre('save', function (next) {
     this.rating.reviewCount = reviews.length;
   }
 
-  // Calculate profile completeness (example logic)
+  // Calculate profile completeness
   const fields = [
     this.personalInfo.username,
     this.personalInfo.fullname,
@@ -204,12 +208,14 @@ UserSchema.pre('save', function (next) {
   next();
 });
 
-// Indexes for performance
+// Indexes (updated with report-related analytics)
 UserSchema.index({ 'personalInfo.email': 1 });
 UserSchema.index({ 'personalInfo.username': 1 }, { sparse: true });
 UserSchema.index({ 'personalInfo.phone': 1 });
-UserSchema.index({ 'personalInfo.location.coordinates': '2dsphere' }); // Geospatial index
-UserSchema.index({ 'analytics.lastActive': 1 }); // For sorting active users
-UserSchema.index({ 'stats.listingFeesPaid': 1 }); // For revenue tracking
+UserSchema.index({ 'personalInfo.location.coordinates': '2dsphere' });
+UserSchema.index({ 'analytics.lastActive': 1 });
+UserSchema.index({ 'stats.listingFeesPaid': 1 });
+UserSchema.index({ 'analytics.reportsReceived': 1 }); // New index for reports received
+UserSchema.index({ 'analytics.reportsSubmitted': 1 }); // New index for reports submitted
 
 export const userModel = mongoose.model('User', UserSchema);

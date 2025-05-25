@@ -13,9 +13,13 @@ export const connectDB = async () => {
       throw new Error("❌ MONGO_DB_URL is not defined. Check your .env file or environment variables.");
     }
 
-    await mongoose.connect(mongoURI, {
-      serverSelectionTimeoutMS: 10000, // Increased timeout (useful for slow connections)
+     await mongoose.connect(mongoURI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 5000, // Timeout after 5s if server unavailable
+        autoIndex: true, // Automatically build indexes defined in schemas
     });
+    
 
     logger.info("✅ MongoDB connected successfully");
   } catch (error) {

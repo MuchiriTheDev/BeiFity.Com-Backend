@@ -8,14 +8,15 @@ import { sendEmail } from '../utils/sendEmail.js';
 import { ReportModel } from '../models/Report.js';
 import { orderModel } from '../models/Order.js';
 
-// Load environment variables
+// Loaditeral: Load environment variables
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
 
 // Email Template for User Report Confirmation
-const generateReportConfirmationEmail = (userName, reportId, reason, details) => {
-  const sanitizedUserName = sanitizeHtml(userName);
+const generateReportConfirmationEmail = (userName, reportId, reportType, reason, details, itemName) => {
+  const sanitizedUserName = sanitizeHtml(userName || 'User');
   const sanitizedReason = sanitizeHtml(reason);
   const sanitizedDetails = sanitizeHtml(details || '');
+  const sanitizedItemName = itemName ? sanitizeHtml(itemName) : null;
 
   return `
     <!DOCTYPE html>
@@ -42,13 +43,13 @@ const generateReportConfirmationEmail = (userName, reportId, reason, details) =>
               </tr>
               <tr>
                 <td>
-                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Report Has Been Submitted</p>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; text-transform: capitalize; margin-bottom: 25px;">Your ${sanitizeHtml(reportType)}${sanitizedItemName ? ' Item' : ''} Report Has Been Submitted</p>
                 </td>
               </tr>
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                    Hi ${sanitizedUserName}, thank you for helping keep <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span> safe. We’ve received your report (ID: ${sanitizeHtml(reportId)}) and our team is reviewing it.
+                    Hi ${sanitizedUserName}, thank you for helping keep <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span> safe. We’ve received your ${sanitizeHtml(reportType)}${sanitizedItemName ? ` item (${sanitizedItemName})` : ''} report (ID: ${sanitizeHtml(reportId)}) and our team is reviewing it.
                   </p>
                 </td>
               </tr>
@@ -56,6 +57,8 @@ const generateReportConfirmationEmail = (userName, reportId, reason, details) =>
                 <td>
                   <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
                     <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Report Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Type:</strong> ${sanitizeHtml(reportType)}</p>
+                    ${sanitizedItemName ? `<p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Item:</strong> ${sanitizedItemName}</p>` : ''}
                     <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Reason:</strong> ${sanitizedReason}</p>
                     <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Details:</strong> ${sanitizedDetails || 'None provided'}</p>
                   </div>
@@ -92,10 +95,13 @@ const generateReportConfirmationEmail = (userName, reportId, reason, details) =>
 };
 
 // Email Template for Admin New Report Alert
-const generateAdminReportAlertEmail = (reportId, userName, reason, details, sellerId, orderId, productId) => {
+const generateAdminReportAlertEmail = (reportId, userName, reportType, reason, details, reportedEntityId, itemName, itemId) => {
   const sanitizedReason = sanitizeHtml(reason);
   const sanitizedDetails = sanitizeHtml(details || '');
   const sanitizedUserName = sanitizeHtml(userName || 'Anonymous');
+  const sanitizedReportType = sanitizeHtml(reportType);
+  const sanitizedItemName = itemName ? sanitizeHtml(itemName) : null;
+  const sanitizedItemId = itemId ? sanitizeHtml(itemId) : null;
 
   return `
     <!DOCTYPE html>
@@ -117,7 +123,7 @@ const generateAdminReportAlertEmail = (reportId, userName, reason, details, sell
               </tr>
               <tr>
                 <td>
-                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New Report Submitted</h2>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New ${sanitizedReportType}${sanitizedItemName ? ' Item' : ''} Report Submitted</h2>
                 </td>
               </tr>
               <tr>
@@ -128,7 +134,7 @@ const generateAdminReportAlertEmail = (reportId, userName, reason, details, sell
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                    A new report has been submitted on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Please review the details below and take appropriate action.
+                    A new ${sanitizedReportType}${sanitizedItemName ? ` item (${sanitizedItemName})` : ''} report has been submitted on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Please review the details below and take appropriate action.
                   </p>
                 </td>
               </tr>
@@ -137,11 +143,12 @@ const generateAdminReportAlertEmail = (reportId, userName, reason, details, sell
                   <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
                     <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Report Details</p>
                     <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Reported By:</strong> ${sanitizedUserName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Type:</strong> ${sanitizedReportType}</p>
+                    ${sanitizedItemName ? `<p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Item:</strong> ${sanitizedItemName}</p>` : ''}
+                    ${sanitizedItemId ? `<p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Item ID:</strong> ${sanitizedItemId}</p>` : ''}
                     <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Reason:</strong> ${sanitizedReason}</p>
                     <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Details:</strong> ${sanitizedDetails || 'None provided'}</p>
-                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Seller ID:</strong> ${sanitizeHtml(sellerId)}</p>
-                    ${orderId ? `<p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Order ID:</strong> ${sanitizeHtml(orderId)}</p>` : ''}
-                    ${productId ? `<p style="font-size: 13px; color: #475569; margin: 0;"><strong>Product ID:</strong> ${sanitizeHtml(productId)}</p>` : ''}
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Reported Entity ID:</strong> ${sanitizeHtml(reportedEntityId)}</p>
                   </div>
                 </td>
               </tr>
@@ -171,155 +178,226 @@ const generateAdminReportAlertEmail = (reportId, userName, reason, details, sell
     </html>
   `;
 };
-
 /**
  * Create a Report
  * @route POST /api/reports
- * @desc Submit a new report for a seller, optionally with order or product
- * @access Private (requires JWT token)
+ * @desc Submit a new report for a user, order, or listing, with optional item-specific reporting for orders
+ * @access Private (requires JWT token, optional for anonymous)
  */
 export const createReport = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    if (!req.user) {
-      logger.warn('Create report failed: No user data in request');
-      return res.status(401).json({ success: false, message: 'Authentication required' });
-    }
-
-    const { sellerId, orderId, productId, reason, details } = req.body;
-    const userId = req.user._id.toString();
+    const { reportType, reportedEntityId, itemId, reason, details } = req.body;
+    const reporterId = req.user?._id?.toString();
+    console.log('Create report request:', { reportType, reportedEntityId, itemId, reason, details, reporterId });
 
     // Validate required fields
-    if (!sellerId) {
-      logger.warn('Create report failed: sellerId required', { userId });
-      return res.status(400).json({ success: false, message: 'sellerId is required' });
+    if (!reportType || !['user', 'order', 'listing'].includes(reportType)) {
+      logger.warn(`Create report failed: Invalid or missing reportType ${reportType}`, { reporterId });
+      return res.status(400).json({ success: false, message: 'Valid reportType (user, order, listing) is required' });
+    }
+    if (!reportedEntityId) {
+      logger.warn('Create report failed: reportedEntityId required', { reporterId });
+      return res.status(400).json({ success: false, message: 'reportedEntityId is required' });
     }
     if (!reason) {
-      logger.warn('Create report failed: Reason required', { userId });
+      logger.warn('Create report failed: Reason required', { reporterId });
       return res.status(400).json({ success: false, message: 'Reason is required' });
     }
     const validReasons = [
       'Fraudulent Activity',
       'Non-Delivery',
-      'Fake Products',
+      'Fake or Counterfeit Product',
       'Inappropriate Behavior',
       'Damaged Item',
       'Wrong Item',
+      'Misleading Listing',
+      'Suspected Stolen Goods',
       'Other',
     ];
     if (!validReasons.includes(reason)) {
-      logger.warn(`Create report failed: Invalid reason ${reason}`, { userId });
+      logger.warn(`Create report failed: Invalid reason ${reason}`, { reporterId });
       return res.status(400).json({ success: false, message: 'Invalid reason' });
     }
 
-    // Validate IDs
-    if (!mongoose.Types.ObjectId.isValid(sellerId)) {
-      logger.warn(`Create report failed: Invalid sellerId ${sellerId}`, { userId });
-      return res.status(400).json({ success: false, message: 'Invalid sellerId' });
-    }
-    if (orderId && !mongoose.Types.ObjectId.isValid(orderId)) {
-      logger.warn(`Create report failed: Invalid orderId ${orderId}`, { userId });
-      return res.status(400).json({ success: false, message: 'Invalid orderId' });
+    // Validate reportedEntityId and itemId format
+    if (reportType === 'user' || reportType === 'order') {
+      if (!mongoose.Types.ObjectId.isValid(reportedEntityId)) {
+        logger.warn(`Create report failed: Invalid reportedEntityId ${reportedEntityId} for ${reportType}`, { reporterId });
+        return res.status(400).json({ success: false, message: `Invalid ${reportType} ID` });
+      }
+      if (reportType === 'order' && typeof itemId !== 'string') {
+        logger.warn(`Create report failed: Invalid itemId ${itemId} for order`, { reporterId });
+        return res.status(400).json({ success: false, message: 'Invalid itemId' });
+      }
+    } else if (reportType === 'listing' && typeof reportedEntityId !== 'string') {
+      logger.warn(`Create report failed: Invalid reportedEntityId ${reportedEntityId} for listing`, { reporterId });
+      return res.status(400).json({ success: false, message: 'Invalid listing ID' });
     }
 
-    // Validate existence
-    const user = await userModel.findById(userId).session(session);
-    if (!user) {
-      logger.warn(`Create report failed: User ${userId} not found`);
-      return res.status(404).json({ success: false, message: 'Reporting user not found' });
-    }
-    const seller = await userModel.findById(sellerId).session(session);
-    if (!seller) {
-      logger.warn(`Create report failed: Seller ${sellerId} not found`, { userId });
-      return res.status(404).json({ success: false, message: 'Seller not found' });
-    }
-    if (orderId) {
-      const order = await orderModel.findById(orderId).session(session);
-      if (!order || order.customerId.toString() !== userId) {
-        logger.warn(`Create report failed: Order ${orderId} not found or unauthorized`, { userId });
-        return res.status(404).json({ success: false, message: 'Order not found or not associated with this user' });
+    // Validate existence of reported entity
+    let reportedUser = null;
+    let reportedOrder = null;
+    let reportedListing = null;
+    let reportedItem = null;
+    if (reportType === 'user') {
+      reportedUser = await userModel.findById(reportedEntityId).session(session);
+      if (!reportedUser) {
+        logger.warn(`Create report failed: User ${reportedEntityId} not found`, { reporterId });
+        return res.status(404).json({ success: false, message: 'Reported user not found' });
+      }
+    } else if (reportType === 'order') {
+      reportedOrder = await orderModel.findOne({orderId: reportedEntityId}).session(session);
+      console.log('Reported Order:', reportedOrder);
+      if (!reportedOrder) {
+        logger.warn(`Create report failed: Order ${reportedEntityId} not found`, { reporterId });
+        return res.status(404).json({ success: false, message: 'Reported order not found' });
+      }
+      // Ensure reporter is the customer who placed the order (if not anonymous)
+      if (reporterId && reportedOrder.customerId.toString() !== reporterId) {
+        logger.warn(`Create report failed: Order ${reportedEntityId} not associated with reporter ${reporterId}`);
+        return res.status(403).json({ success: false, message: 'Order not associated with this user' });
+      }
+      // Validate itemId if provided
+      if (itemId) {
+        reportedItem = reportedOrder.items.find(item => item.productId === itemId);
+        if (!reportedItem) {
+          logger.warn(`Create report failed: Item ${itemId} not found in order ${reportedEntityId}`, { reporterId });
+          return res.status(404).json({ success: false, message: 'Reported item not found in order' });
+        }
+      }
+    } else if (reportType === 'listing') {
+      reportedListing = await listingModel.findOne({ 'productInfo.productId': reportedEntityId }).session(session);
+      if (!reportedListing) {
+        logger.warn(`Create report failed: Listing ${reportedEntityId} not found`, { reporterId });
+        return res.status(404).json({ success: false, message: 'Reported listing not found' });
       }
     }
-    if (productId) {
-      const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
-      if (!listing || listing.seller.sellerId.toString() !== sellerId) {
-        logger.warn(`Create report failed: Product ${productId} not found or not associated with seller`, { userId });
-        return res.status(404).json({ success: false, message: 'Product not found or not associated with this seller' });
+
+    // Validate reporter (if not anonymous)
+    let reporter = null;
+    if (reporterId) {
+      reporter = await userModel.findById(reporterId).session(session);
+      if (!reporter) {
+        logger.warn(`Create report failed: Reporter ${reporterId} not found`);
+        return res.status(404).json({ success: false, message: 'Reporting user not found' });
+      }
+      // Prevent self-reporting for user reports
+      if (reportType === 'user' && reportedEntityId === reporterId) {
+        logger.warn(`Create report failed: User ${reporterId} attempted to report themselves`);
+        return res.status(400).json({ success: false, message: 'Cannot report yourself' });
       }
     }
 
-    // Prevent self-reporting
-    if (sellerId === userId) {
-      logger.warn(`Create report failed: User ${userId} attempted to report themselves`);
-      return res.status(400).json({ success: false, message: 'Cannot report yourself' });
+    // Check for recent reports to prevent abuse (if not anonymous)
+    if (reporterId) {
+      const recentReports = await ReportModel.countDocuments({
+        reporterId,
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
+      }).session(session);
+      if (recentReports >= 5) {
+        logger.warn(`Create report failed: User ${reporterId} exceeded report limit`);
+        return res.status(429).json({ success: false, message: 'Too many reports submitted recently. Please try again later.' });
+      }
     }
-
-    // Check for recent reports to prevent abuse
-    const recentReports = await ReportModel.countDocuments({
-      userId,
-      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
-    }).session(session);
-    if (recentReports >= 5) {
-      logger.warn(`Create report failed: User ${userId} exceeded report limit`);
-      return res.status(429).json({ success: false, message: 'Too many reports submitted recently. Please try again later.' });
-    }
-
-    const report = new ReportModel({
-      userId,
-      sellerId,
-      orderId: orderId || null,
-      productId: productId || null,
+    
+    // Create report
+    const reportData = {
+      reporterId: reporterId || null,
+      reportType,
+      reportedEntityId,
       reason: sanitizeHtml(reason),
       details: sanitizeHtml(details || ''),
-    });
+    };
+    if (reportType === 'user') reportData.userId = reportedEntityId;
+    if (reportType === 'order') {
+      reportData.orderId = reportedEntityId;
+      if (itemId) reportData.itemId = itemId;
+    }
+    if (reportType === 'listing') reportData.productId = reportedEntityId;
 
+    console.log("What is being ",reportData)
+    const report = new ReportModel(reportData);
     const savedReport = await report.save({ session });
-
-    // Update user analytics
-    await userModel.updateOne(
-      { _id: userId },
-      { $inc: { 'analytics.reportsSubmitted': 1 } },
-      { session }
-    );
-    await userModel.updateOne(
-      { _id: sellerId },
-      { $inc: { 'analytics.reportsReceived': 1 } },
-      { session }
-    );
+    // Update analytics counters
+    if (reporterId) {
+      await userModel.updateOne(
+        { _id: reporterId },
+        { $inc: { 'analytics.reportsSubmitted': 1 } },
+        { session }
+      );
+    }
+    if (reportType === 'user') {
+      await userModel.updateOne(
+        { _id: reportedEntityId },
+        { $inc: { 'analytics.reportsReceived': 1 } },
+        { session }
+      );
+    } else if (reportType === 'order') {
+      // Increment order-level reportCount
+      await orderModel.updateOne(
+        { _id: reportedEntityId },
+        { $inc: { reportCount: 1 } },
+        { session }
+      );
+      // Increment item-level reportCount and seller's reportsReceived if itemId is provided
+      if (reportedItem) {
+        await orderModel.updateOne(
+          { _id: reportedEntityId, 'items.productId': itemId },
+          { $inc: { 'items.$.reportCount': 1 } },
+          { session }
+        );
+        await userModel.updateOne(
+          { _id: reportedItem.sellerId },
+          { $inc: { 'analytics.reportsReceived': 1 } },
+          { session }
+        );
+      }
+    } else if (reportType === 'listing') {
+      await listingModel.updateOne(
+        { 'productInfo.productId': reportedEntityId },
+        { $inc: { 'analytics.reportsReceived': 1 } },
+        { session }
+      );
+    }
 
     // Commit transaction
     await session.commitTransaction();
 
-    // Send confirmation email to user
-    if (user.personalInfo.email) {
+    // Send confirmation email to reporter (if not anonymous)
+    if (reporter && reporter.personalInfo.email) {
       const emailContent = generateReportConfirmationEmail(
-        user.personalInfo.fullname || 'User',
+        reporter.personalInfo.fullname,
         savedReport._id,
+        reportType,
         reason,
-        details
+        details,
+        reportedItem ? reportedItem.name : null // Include item name if applicable
       );
       const emailSent = await sendEmail(
-        user.personalInfo.email,
-        'Your Report Confirmation - BeiFity.Com',
+        reporter.personalInfo.email,
+        `Your ${reportType}${reportedItem ? ' Item' : ''} Report Confirmation - BeiFity.Com`,
         emailContent
       );
       if (!emailSent) {
-        logger.warn(`Failed to send report confirmation email to user ${userId}`, { reportId: savedReport._id });
+        logger.warn(`Failed to send report confirmation email to user ${reporterId}`, { reportId: savedReport._id });
       } else {
-        logger.info(`Report confirmation email sent to user ${userId}`, { reportId: savedReport._id });
+        logger.info(`Report confirmation email sent to user ${reporterId}`, { reportId: savedReport._id });
       }
     }
 
-    // Create user notification
-    const notification = new notificationModel({
-      userId,
-      sender: userId,
-      type: 'report',
-      content: `Your report (ID: ${savedReport._id}) has been submitted and is under review.`,
-    });
-    await notification.save();
-    logger.info(`Notification created for user ${userId}`, { reportId: savedReport._id });
+    // Create user notification (if not anonymous)
+    if (reporterId) {
+      const notification = new notificationModel({
+        userId: reporterId,
+        sender: reporterId,
+        type: 'report',
+        content: `Your ${reportType}${reportedItem ? ` item (${reportedItem.name})` : ''} report (ID: ${savedReport._id}) has been submitted and is under review.`,
+      });
+      await notification.save();
+      logger.info(`Notification created for user ${reporterId}`, { reportId: savedReport._id });
+    }
 
     // Send admin alert email
     const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('personalInfo.email personalInfo.fullname').session(null);
@@ -327,19 +405,20 @@ export const createReport = async (req, res) => {
       if (admin.personalInfo.email) {
         const adminEmailContent = generateAdminReportAlertEmail(
           savedReport._id,
-          user.personalInfo.fullname,
+          reporter ? reporter.personalInfo.fullname : null,
+          reportType,
           reason,
           details,
-          sellerId,
-          orderId,
-          productId
+          reportedEntityId,
+          reportedItem ? reportedItem.name : null,
+          itemId
         );
-        const adminEmailSent = await sendEmail(
+        const emailSent = await sendEmail(
           admin.personalInfo.email,
-          'New Report Alert - BeiFity.Com',
+          `New ${reportType}${reportedItem ? ' Item' : ''} Report Alert - BeiFity.Com`,
           adminEmailContent
         );
-        if (!adminEmailSent) {
+        if (!emailSent) {
           logger.warn(`Failed to send report alert email to admin ${admin._id}`, { reportId: savedReport._id });
         } else {
           logger.info(`Report alert email sent to admin ${admin._id}`, { reportId: savedReport._id });
@@ -347,19 +426,20 @@ export const createReport = async (req, res) => {
       }
     }
 
-    logger.info(`Report created successfully: ${savedReport._id} by user ${userId}`);
+    logger.info(`Report created successfully: ${savedReport._id} by ${reporterId || 'anonymous'}`);
     res.status(201).json({
       success: true,
       message: 'Report submitted successfully',
       data: savedReport,
     });
   } catch (error) {
+    console.log(error)
     await session.abortTransaction();
     if (error instanceof mongoose.Error.ValidationError) {
-      logger.warn(`Create report failed: Validation error`, { error: error.errors, userId });
+      logger.warn(`Create report failed: Validation error`, { error: error.errors });
       return res.status(400).json({ success: false, message: 'Validation error', error: error.errors });
     }
-    logger.error(`Error creating report: ${error.message}`, { stack: error.stack, userId });
+    logger.error(`Error creating report: ${error.message}`, { stack: error.stack});
     res.status(500).json({ success: false, message: 'Server error while submitting report' });
   } finally {
     session.endSession();
@@ -384,11 +464,11 @@ export const getAllReports = async (req, res) => {
     }
 
     const reports = await ReportModel.find({})
+      .populate('reporterId', 'personalInfo.fullname personalInfo.email')
       .populate('userId', 'personalInfo.fullname personalInfo.email')
-      .populate('sellerId', 'personalInfo.fullname personalInfo.email')
       .populate({
         path: 'orderId',
-        select: 'orderId totalAmount',
+        select: 'orderId totalAmount status',
       })
       .populate({
         path: 'productId',
@@ -435,11 +515,11 @@ export const getReportById = async (req, res) => {
     }
 
     const report = await ReportModel.findById(id)
+      .populate('reporterId', 'personalInfo.fullname personalInfo.email')
       .populate('userId', 'personalInfo.fullname personalInfo.email')
-      .populate('sellerId', 'personalInfo.fullname personalInfo.email')
       .populate({
         path: 'orderId',
-        select: 'orderId totalAmount',
+        select: 'orderId totalAmount status',
       })
       .populate({
         path: 'productId',
@@ -510,10 +590,10 @@ export const updateReportStatus = async (req, res) => {
 
     await report.save({ session });
 
-    // Notify user if status changed to Resolved or Dismissed
-    if (status && status !== previousStatus && ['Resolved', 'Dismissed'].includes(status) && report.userId) {
-      const user = await userModel.findById(report.userId).session(session);
-      if (user && user.personalInfo.email) {
+    // Notify reporter if status changed to Resolved or Dismissed (if not anonymous)
+    if (status && status !== previousStatus && ['Resolved', 'Dismissed'].includes(status) && report.reporterId) {
+      const reporter = await userModel.findById(report.reporterId).session(session);
+      if (reporter && reporter.personalInfo.email) {
         const emailContent = `
           <!DOCTYPE html>
           <html lang="en">
@@ -534,18 +614,18 @@ export const updateReportStatus = async (req, res) => {
                     </tr>
                     <tr>
                       <td>
-                        <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Report Update, ${sanitizeHtml(user.personalInfo.fullname || 'User')}!</h2>
+                        <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Report Update, ${sanitizeHtml(reporter.personalInfo.fullname || 'User')}!</h2>
                       </td>
                     </tr>
                     <tr>
                       <td>
-                        <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Report Status Has Changed</p>
+                        <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your ${sanitizeHtml(report.reportType)} Report Status Has Changed</p>
                       </td>
                     </tr>
                     <tr>
                       <td>
                         <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                          Hi ${sanitizeHtml(user.personalInfo.fullname || 'User')}, the status of your report (ID: ${sanitizeHtml(id)}) has been updated to <strong>${sanitizeHtml(status)}</strong> on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
+                          Hi ${sanitizeHtml(reporter.personalInfo.fullname || 'User')}, the status of your ${sanitizeHtml(report.reportType)} report (ID: ${sanitizeHtml(id)}) has been updated to <strong>${sanitizeHtml(status)}</strong> on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
                         </p>
                       </td>
                     </tr>
@@ -575,25 +655,25 @@ export const updateReportStatus = async (req, res) => {
           </html>
         `;
         const emailSent = await sendEmail(
-          user.personalInfo.email,
-          'Report Status Update - BeiFity.Com',
+          reporter.personalInfo.email,
+          `Report Status Update - BeiFity.Com`,
           emailContent
         );
         if (!emailSent) {
-          logger.warn(`Failed to send status update email to user ${report.userId}`, { reportId: id });
+          logger.warn(`Failed to send status update email to user ${report.reporterId}`, { reportId: id });
         } else {
-          logger.info(`Status update email sent to user ${report.userId}`, { reportId: id });
+          logger.info(`Status update email sent to user ${report.reporterId}`, { reportId: id });
         }
 
         // Create user notification
         const notification = new notificationModel({
-          userId: report.userId,
+          userId: report.reporterId,
           sender: req.user._id,
           type: 'report_status',
-          content: `Your report (ID: ${id}) status has been updated to ${status}.`,
+          content: `Your ${report.reportType} report (ID: ${id}) status has been updated to ${status}.`,
         });
         await notification.save();
-        logger.info(`Notification created for user ${report.userId}`, { reportId: id });
+        logger.info(`Notification created for user ${report.reporterId}`, { reportId: id });
       }
     }
 
@@ -698,16 +778,15 @@ export const escalateReport = async (req, res) => {
         if (admin.personalInfo.email) {
           const adminEmailContent = generateAdminReportAlertEmail(
             report._id,
-            report.userId ? (await userModel.findById(report.userId)).personalInfo.fullname : null,
+            report.reporterId ? (await userModel.findById(report.reporterId)).personalInfo.fullname : null,
+            report.reportType,
             report.reason,
             report.details,
-            report.sellerId,
-            report.orderId,
-            report.productId
+            report.reportedEntityId
           );
           const adminEmailSent = await sendEmail(
             admin.personalInfo.email,
-            'Report Escalation Alert - BeiFity.Com',
+            `Report Escalation Alert - BeiFity.Com`,
             adminEmailContent
           );
           if (!adminEmailSent) {
@@ -765,11 +844,11 @@ export const getReportsByUser = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const reports = await ReportModel.find({ userId })
-      .populate('sellerId', 'personalInfo.fullname personalInfo.email')
+    const reports = await ReportModel.find({ reporterId: userId })
+      .populate('userId', 'personalInfo.fullname personalInfo.email')
       .populate({
         path: 'orderId',
-        select: 'orderId totalAmount',
+        select: 'orderId totalAmount status',
       })
       .populate({
         path: 'productId',
