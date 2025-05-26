@@ -30,7 +30,6 @@ const app = express();
 app.use(cors({
   origin: corsOptions.origin,
   methods: corsOptions.methods,
-  allowedHeaders: corsOptions.allowedHeaders,
   credentials: true,
 }
 ));
