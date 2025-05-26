@@ -27,7 +27,13 @@ import env from './config/env.js';
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: corsOptions.origin,
+  methods: corsOptions.methods,
+  allowedHeaders: corsOptions.allowedHeaders,
+  credentials: true,
+}
+));
 app.use(httpLogger);
 app.use(bodyParser.json({ limit: '100mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
