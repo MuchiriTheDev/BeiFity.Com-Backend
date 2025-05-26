@@ -338,6 +338,7 @@ export const addToWishlist = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
 
+    
     if (user.wishlist.includes(listingId)) {
       logger.debug(`Wishlist addition skipped: Listing ${listingId} already in wishlist for user ${req.user._id}`);
       return res.status(200).json({ success: true, message: 'Listing already in wishlist' });
