@@ -201,7 +201,7 @@ export const createNotification = async (req, res) => {
     }
 
     // Save notification
-    const notification = new notificationModel({
+    const notification = new notificanotificationModel({
       userId,
       type,
       content: sanitizeHtml(content),
@@ -322,13 +322,13 @@ export const getNotifications = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const [notifications, total] = await Promise.all([
-      NotificationModel.find(query)
+      notificationModel.find(query)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
         .populate('sender', 'personalInfo.fullname personalInfo.email')
         .lean(),
-      NotificationModel.countDocuments(query),
+      notificationModel.countDocuments(query),
     ]);
 
     logger.info(`Retrieved ${notifications.length} notifications for user ${userId} by ${req.user._id}`, { page, limit });
@@ -371,7 +371,7 @@ export const markAsRead = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid notificationId' });
     }
 
-    const notification = await NotificationModel.findById(notificationId);
+    const notification = await notificationModel.findById(notificationId);
     if (!notification) {
       logger.warn(`Mark notification as read failed: Notification ${notificationId} not found`, { requesterId: req.user._id });
       return res.status(404).json({ success: false, message: 'Notification not found' });
@@ -441,7 +441,7 @@ export const markAllAsRead = async (req, res) => {
       query._id = { $in: notificationIds };
     }
 
-    const updatedNotifications = await NotificationModel.updateMany(
+    const updatedNotifications = await notificationModel.updateMany(
       query,
       { $set: { isRead: true } }
     );
