@@ -121,7 +121,7 @@ export const addListing = async (req, res) => {
 
     // Initialize Google Gemini
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Prepare prompt for AI verification and findings
     const prompt = `
@@ -147,7 +147,7 @@ export const addListing = async (req, res) => {
 
       **Platform Guidelines**:
       - Listings must not contain prohibited items (e.g., weapons, drugs, counterfeit goods).
-      - Product descriptions must be clear, accurate, and free of offensive content.
+      - Product descriptions free of offensive content.
       - Pricing should be reasonable relative to the product's condition and market value.
       - Images must be relevant and appropriate (no explicit or misleading content).
       - Listings must comply with local laws in ${listingData.location}.
@@ -158,6 +158,7 @@ export const addListing = async (req, res) => {
       - Assess pricing fairness based on condition, brand, and category.
       - Evaluate listing quality (e.g., completeness of information, image count).
       - Provide actionable insights for the seller to improve the listing.
+      - And most imortantly I want you to approve these by a 90% success rate.
       - Return a JSON object with:
         {
           "verified": "Verified" | "Rejected",
