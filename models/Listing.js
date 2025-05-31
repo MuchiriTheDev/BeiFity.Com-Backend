@@ -1,4 +1,26 @@
+// models/Listing.js
 import mongoose from 'mongoose';
+
+// AI Finding Schema
+const AiFindingSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+  },
+  description: {
+    type: String,
+    required: true,
+  },
+  action: {
+    type: String,
+    required: true,
+  },
+  priority: {
+    type: String,
+    enum: ['high', 'medium', 'low'],
+    required: true,
+  },
+});
 
 // Product Information Schema
 const ProductInfoSchema = new mongoose.Schema({
@@ -109,13 +131,13 @@ const AnalyticsSchema = new mongoose.Schema({
   },
   cartAdditions: {
     total: { type: Number, default: 0 },
-    userIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
-    guestIds: [{ type: String, default: [] }], // Track guest actions
+    userIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
+    guestIds: [{ type: String, default: [] }],
   },
   wishlist: {
     total: { type: Number, default: 0 },
-    userIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
-    guestIds: [{ type: String, default: [] }], // Track guest actions
+    userIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
+    guestIds: [{ type: String, default: [] }],
   },
   shared: {
     total: {
@@ -130,7 +152,7 @@ const AnalyticsSchema = new mongoose.Schema({
   },
   reportsReceived: {
     type: Number,
-    default: 0, // Number of reports filed against this listing
+    default: 0,
   },
   inquiries: {
     type: Number,
@@ -234,6 +256,18 @@ const ListingSchema = new mongoose.Schema({
     type: [String],
     default: ['Local Pickup', 'Delivery'],
   },
+  expiresAt: {
+    type: Date,
+    required: true,
+  },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  aiFindings: {
+    type: [AiFindingSchema],
+    default: [],
+  },
 }, { timestamps: true });
 
 // Pre-save hook to calculate rating
@@ -245,5 +279,8 @@ ListingSchema.pre('save', function (next) {
   }
   next();
 });
+
+// Index for expiration
+ListingSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const listingModel = mongoose.model('Listing', ListingSchema);

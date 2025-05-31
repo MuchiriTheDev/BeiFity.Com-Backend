@@ -11,7 +11,6 @@ import {
   removeFromWishlist,
   addToCart,
   shareListing,
-  verifyListing,
   markAsSold,
   promoteListing,
   updateResponseTime,
@@ -44,6 +43,7 @@ listingRouter.post('/:productId/wishlist/add',  addToWishlist);
 listingRouter.post('/:productId/wishlist/remove',  removeFromWishlist);
 listingRouter.post('/:productId/cart/add',  addToCart);
 listingRouter.post('/:productId/cart/remove', removeFromCart)
+listingRouter.put('/:productId/renew', authUser, addToCart);
 
 // Private Routes (authenticated users)
 listingRouter.post('/add', authUser, addListing);
@@ -56,7 +56,6 @@ listingRouter.put('/:productId/promote', authUser, promoteListing);
 listingRouter.put('/:productId/inventory', authUser, updateInventory);
 
 // Admin Routes
-listingRouter.put('/admin/:productId/verify', authUser, verifyListing);
 listingRouter.get('/admin/pending', authUser, getPendingListings);
 listingRouter.put('/admin/:productId/response-time', authUser, updateResponseTime);
 listingRouter.put('/admin/:productId/acceptance-rate', authUser, updateAcceptanceRate);

@@ -1,3 +1,4 @@
+// controllers/listingController.js
 import mongoose from 'mongoose';
 import { listingModel } from '../models/Listing.js';
 import { userModel } from '../models/User.js';
@@ -5,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
 import { notificationModel } from '../models/Notifications.js';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 // Helper to send notification
 export const sendListingNotification = async (
@@ -16,14 +18,12 @@ export const sendListingNotification = async (
   session = null
 ) => {
   try {
-    // Validate user
     const user = await userModel.findById(userId).session(session);
     if (!user) {
       logger.warn(`Send notification failed: User ${userId} not found`, { type, productId });
       return false;
     }
 
-    // Save notification
     const notification = new notificationModel({
       userId,
       type,
@@ -73,7 +73,6 @@ export const addListing = async (req, res) => {
       });
     }
 
-    // Validate inventory
     if (typeof inventory !== 'number' || inventory < 1) {
       logger.warn('Add listing failed: Invalid inventory', { userId, inventory });
       return res.status(400).json({ success: false, message: 'Inventory must be a positive number' });
@@ -108,7 +107,7 @@ export const addListing = async (req, res) => {
       analytics: {},
       reviews: [],
       negotiable: Boolean(negotiable),
-      verified: 'Pending',
+      verified: 'Pending', // Initially set to Pending until AI verification
       location: sanitizeHtml(location?.trim() || 'Kenya'),
       isSold: false,
       AgreedToTerms: Boolean(AgreedToTerms),
@@ -116,7 +115,109 @@ export const addListing = async (req, res) => {
       promotedUntil: featured ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
       inventory,
       shippingOptions: shippingOptions || ['Local Pickup', 'Delivery'],
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Set expiration to 30 days
+      isActive: true, // Initially active
     };
+
+    // Initialize Google Gemini
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.-flash' });
+
+    // Prepare prompt for AI verification and findings
+    const prompt = `
+      You are an AI assistant for a marketplace platform. Your task is to verify a new product listing for compliance with platform guidelines and generate insights about potential risks, pricing fairness, and listing quality.
+
+      **Listing Data**:
+      - Product Name: ${listingData.productInfo.name}
+      - Description: ${listingData.productInfo.description}
+      - Price: KES ${listingData.productInfo.price}
+      - Category: ${listingData.productInfo.category}
+      - Subcategory: ${listingData.productInfo.subCategory}
+      - Tags: ${JSON.stringify(listingData.productInfo.tags)}
+      - Images: ${listingData.productInfo.images.length} images provided
+      - Condition: ${listingData.productInfo.condition}
+      - Usage Duration: ${listingData.productInfo.usageDuration}
+      - Brand: ${listingData.productInfo.brand}
+      - Model: ${listingData.productInfo.model}
+      - Warranty: ${listingData.productInfo.warranty}
+      - Inventory: ${listingData.inventory}
+      - Negotiable: ${listingData.negotiable}
+      - Location: ${listingData.location}
+      - Shipping Options: ${JSON.stringify(listingData.shippingOptions)}
+
+      **Platform Guidelines**:
+      - Listings must not contain prohibited items (e.g., weapons, drugs, counterfeit goods).
+      - Product descriptions must be clear, accurate, and free of offensive content.
+      - Pricing should be reasonable relative to the product's condition and market value.
+      - Images must be relevant and appropriate (no explicit or misleading content).
+      - Listings must comply with local laws in ${listingData.location}.
+
+      **Instructions**:
+      - Verify if the listing complies with platform guidelines.
+      - Identify potential risks (e.g., vague descriptions, suspicious pricing, prohibited items).
+      - Assess pricing fairness based on condition, brand, and category.
+      - Evaluate listing quality (e.g., completeness of information, image count).
+      - Provide actionable insights for the seller to improve the listing.
+      - Return a JSON object with:
+        {
+          "verified": "Verified" | "Rejected",
+          "findings": [
+            {
+              "title": "Insight title",
+              "description": "Detailed description of the issue or observation",
+              "action": "Recommended action to address the issue or improve the listing",
+              "priority": "high" | "medium" | "low"
+            },
+            ...
+          ]
+        }
+    `;
+
+    // Perform AI verification
+    const result = await model.generateContent({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1500,
+      },
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+      ],
+    });
+
+    let aiResponse;
+    try {
+      const rawResponse = result.response.text().replace(/```json\s*|\s*```/g, '').trim();
+      aiResponse = JSON.parse(rawResponse);
+    } catch (error) {
+      logger.error(`Failed to parse AI response for listing ${productId}: ${error.message}`);
+      aiResponse = {
+        verified: 'Rejected',
+        findings: [
+          {
+            title: 'AI Verification Error',
+            description: 'Unable to process listing due to an error in AI verification.',
+            action: 'Manually review the listing for compliance.',
+            priority: 'high',
+          },
+        ],
+      };
+    }
+
+    // Update listing data with AI verification result and findings
+    listingData.verified = aiResponse.verified;
+    listingData.aiFindings = aiResponse.findings;
 
     const listing = new listingModel(listingData);
     await listing.save({ session });
@@ -130,37 +231,44 @@ export const addListing = async (req, res) => {
       { session }
     );
 
-    // Notify seller
+    // Notify seller about listing status and findings
+    const findingsSummary = aiResponse.findings
+      .map((finding) => `- ${finding.title} (${finding.priority}): ${finding.description} [Action: ${finding.action}]`)
+      .join('\n');
     await sendListingNotification(
       userId,
-      'listing_created',
-      `Your listing "${listingData.productInfo.name}" has been created and is pending verification.`,
+      aiResponse.verified === 'Verified' ? 'listing_verified' : 'listing_rejected',
+      `Your listing "${listingData.productInfo.name}" has been ${aiResponse.verified.toLowerCase()}. ${
+        aiResponse.verified === 'Verified'
+          ? 'It is now live!'
+          : 'Please review the following findings and update your listing:\n' + findingsSummary
+      }`,
       productId,
-      userId,
+      null,
       session
     );
 
-    const user = await userModel.findById(userId).session(session);
-
-    // Notify admins
-    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
-    for (const admin of admins) {
-      await sendListingNotification(
-        admin._id,
-        'admin_pending_listing',
-        `A new listing "${listingData.productInfo.name}" by ${user.personalInfo.fullname} is pending verification.`,
-        productId,
-        req.user._id,
-        session
-      );
+    // If rejected, notify admins for manual review
+    if (aiResponse.verified === 'Rejected') {
+      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
+      for (const admin of admins) {
+        await sendListingNotification(
+          admin._id,
+          'admin_pending_listing',
+          `Listing "${listingData.productInfo.name}" by user ${req.user.personalInfo.fullname} was rejected by AI. Findings:\n${findingsSummary}`,
+          productId,
+          req.user._id,
+          session
+        );
+      }
     }
 
     await session.commitTransaction();
-    logger.info(`Listing created by user ${userId}: ${productId}`);
+    logger.info(`Listing created by user ${userId}: ${productId}, AI verification: ${aiResponse.verified}`);
     res.status(201).json({
       success: true,
-      message: 'Listing created, pending verification',
-      data: listing,
+      message: `Listing ${aiResponse.verified.toLowerCase()}${aiResponse.verified === 'Verified' ? ' and is now live' : ', please review findings'}`,
+      data: { listing, aiFindings: aiResponse.findings },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -170,67 +278,62 @@ export const addListing = async (req, res) => {
     session.endSession();
   }
 };
-
-// Verify Listing (Admin Only)
-export const verifyListing = async (req, res) => {
+// Renew Listing
+export const renewListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     if (!req.user) {
-      logger.warn('Verify listing failed: No user data in request');
+      logger.warn('Renew listing failed: No user data in request');
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
-    const adminId = req.user._id.toString();
-    const admin = await userModel.findById(adminId).session(session);
-
-    if (!admin.personalInfo?.isAdmin) {
-      logger.warn(`Verify listing failed: User ${req.user._id} not admin`);
-      return res.status(403).json({ success: false, message: 'Admin access required' });
-    }
-
     const { productId } = req.params;
-    const { status } = req.body;
-
-    if (!['Verified', 'Rejected'].includes(status)) {
-      logger.warn(`Verify listing failed: Invalid status ${status}`, { productId });
-      return res.status(400).json({ success: false, message: 'Status must be "Verified" or "Rejected"' });
-    }
+    const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing) {
-      logger.warn(`Verify listing failed: Listing ${productId} not found`);
+      logger.warn(`Renew listing failed: Listing ${productId} not found`);
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
+    if (listing.seller.sellerId.toString() !== userId) {
+      logger.warn(`Renew listing failed: User ${userId} not authorized`, { productId });
+      return res.status(403).json({ success: false, message: 'Unauthorized to renew this listing' });
+    }
+    if (listing.isActive) {
+      logger.warn(`Renew listing failed: Listing ${productId} is already active`);
+      return res.status(400).json({ success: false, message: 'Listing is already active' });
+    }
 
-    listing.verified = status;
+    listing.isActive = true;
+    listing.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await listing.save({ session });
 
-    // Notify seller
-    const notificationType = status === 'Verified' ? 'listing_verified' : 'listing_rejected';
-    const notificationContent =
-      status === 'Verified'
-        ? `Your listing "${listing.productInfo.name}" has been verified and is now live!`
-        : `Your listing "${listing.productInfo.name}" was rejected. Please review the guidelines.`;
+    await userModel.findByIdAndUpdate(
+      userId,
+      { $inc: { 'stats.activeListingsCount': 1 } },
+      { session }
+    );
+
     await sendListingNotification(
-      listing.seller.sellerId,
-      notificationType,
-      notificationContent,
+      userId,
+      'listing_renewed',
+      `Your listing "${listing.productInfo.name}" has been renewed and is now active for another 30 days.`,
       productId,
-      adminId,
+      null,
       session
     );
 
     await session.commitTransaction();
-    logger.info(`Listing ${productId} ${status.toLowerCase()} by admin ${adminId}`);
+    logger.info(`Listing ${productId} renewed by user ${userId}`);
     res.status(200).json({
       success: true,
-      message: `Listing ${status.toLowerCase()} successfully`,
+      message: 'Listing renewed successfully',
       data: listing,
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error verifying listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
-    res.status(500).json({ success: false, message: 'Failed to verify listing' });
+    logger.error(`Error renewing listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    res.status(500).json({ success: false, message: 'Failed to renew listing' });
   } finally {
     session.endSession();
   }
@@ -791,7 +894,7 @@ export const promoteListing = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
     const { productId } = req.params;
-    const { duration } = req.body;
+    const duration = 30; // Default promotion duration in days
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
@@ -944,10 +1047,10 @@ export const transferGuestData = async (req, res) => {
 export const getListings = async (req, res) => {
   try {
     const listings = await listingModel
-      .find({ verified: 'Verified', isSold: false })
-      .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone personalInfo.rating')
+      .find({ verified: 'Verified', isSold: false, isActive: true })
+      .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
-    logger.info(`Fetched ${listings.length} verified listings`);
+    logger.info(`Fetched ${listings.length} verified and active listings`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
     logger.error(`Error fetching listings: ${error.message}`, { stack: error.stack });
@@ -955,6 +1058,7 @@ export const getListings = async (req, res) => {
   }
 };
 
+// Get Listing by ID
 // Get Listing by ID
 export const getListingById = async (req, res) => {
   try {
@@ -967,6 +1071,14 @@ export const getListingById = async (req, res) => {
     if (!listing || listing.verified !== 'Verified') {
       logger.warn(`Listing fetch failed: Listing ${productId} not found or not verified`);
       return res.status(404).json({ success: false, message: 'Listing not found or not verified' });
+    }
+    if (!listing.isActive) {
+      logger.info(`Listing ${productId} fetched but is inactive`);
+      return res.status(200).json({
+        success: true,
+        message: 'Listing is inactive and requires renewal',
+        data: listing,
+      });
     }
     logger.info(`Listing fetched for product ${productId}`);
     res.status(200).json({ success: true, data: listing });
@@ -1451,7 +1563,7 @@ export const getPendingListings = async (req, res) => {
     logger.info(`Fetched ${listings.length} pending listings by admin ${req.user._id}`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
-    logger.error(`Error fetching pending listings: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Errgsor fetching pending listings: ${error.message}`, { stack: error.stack, userId: req.user?._id });
     res.status(500).json({ success: false, message: 'Failed to fetch pending listings' });
   }
 };
@@ -1460,10 +1572,10 @@ export const getPendingListings = async (req, res) => {
 export const getFeaturedListings = async (req, res) => {
   try {
     const listings = await listingModel
-      .find({ featured: true, verified: 'Verified', isSold: false })
+      .find({ featured: true, verified: 'Verified', isSold: false, isActive: true })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
-    logger.info(`Fetched ${listings.length} featured listings`);
+    logger.info(`Fetched ${listings.length} featured and active listings`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
     logger.error(`Error fetching featured listings: ${error.message}`, { stack: error.stack });
@@ -1496,14 +1608,86 @@ export const getListingsNear = async (req, res) => {
         },
         verified: 'Verified',
         isSold: false,
+        isActive: true,
       })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone personalInfo.location')
       .lean();
 
-    logger.info(`Fetched ${listings.length} listings near [${lat}, ${lng}]`);
+    logger.info(`Fetched ${listings.length} active listings near [${lat}, ${lng}]`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
     logger.error(`Error fetching nearby listings: ${error.message}`, { stack: error.stack, lat, lng });
     res.status(500).json({ success: false, message: 'Failed to fetch nearby listings' });
+  }
+};
+
+// Verify Listing (Admin Only)
+export const verifyListing = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    if (!req.user) {
+      logger.warn('Verify listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    const adminId = req.user._id.toString();
+    const admin = await userModel.findById(adminId).session(session);
+
+    if (!admin.personalInfo?.isAdmin) {
+      logger.warn(`Verify listing failed: User ${req.user._id} not admin`);
+      return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+
+    const { productId } = req.params;
+    const { status } = req.body;
+
+    if (!['Verified', 'Rejected'].includes(status)) {
+      logger.warn(`Verify listing failed: Invalid status ${status}`, { productId });
+      return res.status(400).json({ success: false, message: 'Status must be "Verified" or "Rejected"' });
+    }
+
+    const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
+    if (!listing) {
+      logger.warn(`Verify listing failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+
+    listing.verified = status;
+    await listing.save({ session });
+
+    const findingsSummary = listing.aiFindings
+      ? listing.aiFindings
+          .map((finding) => `- ${finding.title} (${finding.priority}): ${finding.description} [Action: ${finding.action}]`)
+          .join('\n')
+      : 'No AI findings available.';
+
+    // Notify seller
+    const notificationType = status === 'Verified' ? 'listing_verified' : 'listing_rejected';
+    const notificationContent =
+      status === 'Verified'
+        ? `Your listing "${listing.productInfo.name}" has been manually verified by an admin and is now live!`
+        : `Your listing "${listing.productInfo.name}" was manually rejected by an admin. AI Findings:\n${findingsSummary}`;
+    await sendListingNotification(
+      listing.seller.sellerId,
+      notificationType,
+      notificationContent,
+      productId,
+      adminId,
+      session
+    );
+
+    await session.commitTransaction();
+    logger.info(`Listing ${productId} ${status.toLowerCase()} by admin ${adminId}`);
+    res.status(200).json({
+      success: true,
+      message: `Listing ${status.toLowerCase()} successfully`,
+      data: listing,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Error verifying listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    res.status(500).json({ success: false, message: 'Failed to verify listing' });
+  } finally {
+    session.endSession();
   }
 };

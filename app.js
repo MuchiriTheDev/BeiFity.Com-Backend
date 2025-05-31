@@ -23,6 +23,7 @@ import cloudinaryRouter from './routes/cloudinaryRoutes.js';
 import logger from './utils/logger.js';
 import { initializeSocket } from './utils/socket.js';
 import env from './config/env.js';
+import './utils/expireListings.js'
 
 const app = express();
 
