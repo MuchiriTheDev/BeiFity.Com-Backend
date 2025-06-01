@@ -7,6 +7,8 @@ import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
 import { notificationModel } from '../models/Notifications.js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import { sendEmail } from '../utils/sendEmail.js';
+import env from '../config/env.js';
 
 // Helper to send notification
 export const sendListingNotification = async (
@@ -1048,9 +1050,10 @@ export const transferGuestData = async (req, res) => {
 export const getListings = async (req, res) => {
   try {
     const listings = await listingModel
-      .find({ verified: 'Verified', isSold: false, isActive: true })
+      .find({ verified: 'Verified', isSold: false , isActive: true })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
+    
     logger.info(`Fetched ${listings.length} verified and active listings`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
@@ -1690,5 +1693,137 @@ export const verifyListing = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to verify listing' });
   } finally {
     session.endSession();
+  }
+};
+
+/**
+ * Update All Listings
+ * @route POST /api/listings/update-all
+ * @desc Update all listings to set isActive to true, initialize aiFindings, and set expiresAt to 30 days from now, and notify sellers
+ * @access Private (admin-only, add authentication middleware if needed)
+ */
+export const updateAllListings = async (req, res) => {
+  try {
+    // Calculate expiration date (30 days from now)
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+    // Update all listings
+    const updateResult = await listingModel.updateMany(
+      {}, // Match all documents
+      {
+        $set: {
+          isActive: true,
+          expiresAt: thirtyDaysFromNow,
+          aiFindings: [] // Initialize aiFindings as empty array if not present
+        }
+      }
+    );
+
+    logger.info(`Updated ${updateResult.modifiedCount} listings to isActive: true, expiresAt: ${thirtyDaysFromNow}`);
+
+    // Fetch all listings to get seller information
+    const listings = await listingModel
+      .find({})
+      .populate('seller.sellerId', 'personalInfo.email personalInfo.fullname')
+      .lean();
+
+    // Prepare email promises
+    const emailPromises = listings.map(async (listing) => {
+      const seller = listing.seller?.sellerId;
+      if (!seller || !seller.personalInfo?.email) {
+        logger.warn(`No valid email for seller of listing ${listing._id}`);
+        return;
+      }
+
+      const emailContent = `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Listing Status Update</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+                  <!-- Logo -->
+                  <tr>
+                    <td>
+                      <img src="https://bei-fity-com.vercel.app/assets/logo-without-Dr_6ibJh.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                    </td>
+                  </tr>
+                  <!-- Heading -->
+                  <tr>
+                    <td>
+                      <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Your Listing is Now Active!</h2>
+                    </td>
+                  </tr>
+                  <!-- Greeting -->
+                  <tr>
+                    <td>
+                      <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Hello ${seller.personalInfo.fullname || 'Seller'},</p>
+                    </td>
+                  </tr>
+                  <!-- Message -->
+                  <tr>
+                    <td>
+                      <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                        We’re pleased to inform you that your listing <strong>"${listing.productInfo.name}"</strong> is now active on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>! It will remain active until <strong>${thirtyDaysFromNow.toLocaleDateString()}</strong>.
+                      </p>
+                      <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                        You can manage your listing or view its performance directly on our platform.
+                      </p>
+                    </td>
+                  </tr>
+                  <!-- Button -->
+                  <tr>
+                    <td>
+                      <a href="${env.FRONTEND_URL}/listings/${listing._id}" style="display: inline-block; padding: 15px 20px; background-color: #1e40af; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 700; border-radius: 8px; margin-bottom: 30px; transition: background-color 0.3s;">View Your Listing</a>
+                    </td>
+                  </tr>
+                  <!-- Note -->
+                  <tr>
+                    <td>
+                      <p style="font-size: 13px; color: #64748b; margin-top: 20px;">If you have any questions, please contact our support team.</p>
+                    </td>
+                  </tr>
+                  <!-- Footer -->
+                  <tr>
+                    <td style="margin-top: 30px;">
+                      <p style="font-size: 14px; color: #64748b; margin: 0;">Best regards,</p>
+                      <p style="font-weight: 700; color: #d97706; font-size: 16px; margin-top: 10px;">Bei<span style="color: #1e40af;">Fity.Com</span></p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>`;
+
+      try {
+        await sendEmail(
+          seller.personalInfo.email,
+          'Your Listing is Now Active on BeiFity.Com',
+          emailContent
+        );
+        logger.info(`Email sent to ${seller.personalInfo.email} for listing ${listing._id}`);
+      } catch (emailError) {
+        logger.error(`Failed to send email to ${seller.personalInfo.email} for listing ${listing._id}: ${emailError.message}`);
+      }
+    });
+
+    // Send all emails concurrently
+    await Promise.all(emailPromises);
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully updated ${updateResult.modifiedCount} listings and notified sellers`,
+    });
+  } catch (error) {
+    logger.error(`Error updating listings: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'Failed to update listings' });
   }
 };

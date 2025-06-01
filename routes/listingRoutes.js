@@ -25,6 +25,7 @@ import {
   transferGuestData,
   removeFromCart,
   markAsUnSold,
+  updateAllListings,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -61,5 +62,6 @@ listingRouter.put('/admin/:productId/response-time', authUser, updateResponseTim
 listingRouter.put('/admin/:productId/acceptance-rate', authUser, updateAcceptanceRate);
 listingRouter.put('/admin/:productId/conversion-rate', authUser, updateConversionRate);
 listingRouter.put('/admin/:productId/feature', authUser, featureListing);
+listingRouter.post('/admin/update-all', authUser, updateAllListings);
 
 export default listingRouter;
