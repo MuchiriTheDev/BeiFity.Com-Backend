@@ -614,9 +614,9 @@ export const addToCart = async (req, res) => {
 
 // Remove from Wishlist
 export const removeFromWishlist = async (req, res) => {
+  const { productId } = req.params;
+  const { userId, guestId } = req.body;
   try {
-    const { productId } = req.params;
-    const { userId, guestId } = req.body;
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
     if (!listing || listing.verified !== 'Verified' || listing.isSold) {
@@ -669,9 +669,9 @@ export const removeFromWishlist = async (req, res) => {
 export const addToWishlist = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const { productId } = req.params;
+  const { userId, guestId } = req.body;
   try {
-    const { productId } = req.params;
-    const { userId, guestId } = req.body;
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing || listing.verified !== 'Verified' || listing.isSold) {
@@ -680,8 +680,8 @@ export const addToWishlist = async (req, res) => {
     }
 
     if (userId) {
-      if (req.user._id.toString() !== userId) {
-        logger.warn(`Add to wishlist failed: User ${req.user._id} attempted to add as ${userId}`);
+      if (!userId) {
+        logger.warn(`Add to wishlist failed: User  attempted to add as ${userId}`);
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
       if (listing.analytics.wishlist.userIds.includes(userId)) {

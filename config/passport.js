@@ -9,7 +9,7 @@ passport.use(
     {
       clientID: env.CLIENT_ID,
       clientSecret: env.CLIENT_SECRET,
-      callbackURL: `${env.BACKEND_URL}/api/users/google/callback`,
+      callbackURL: `https://beifitycom-backend-production.up.railway.app/api/users/google/callback`,
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
