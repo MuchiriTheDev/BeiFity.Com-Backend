@@ -1,12 +1,17 @@
 import webpush from 'web-push';
 import 'dotenv/config';
+import logger from '../utils/logger.js';
 
 const configureWebpush = () => {
-  webpush.setVapidDetails(
-    'mailto:eddymuchiri123@gmail.com',
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
-};
+  try {
+    webpush.setVapidDetails(
+      'mailto:eddymuchiri123@gmail.com',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+    logger.info('Webpush configured with VAPID keys');
+  } catch (error) {
+    logger.error('Webpush configuration error:', error);
+  }};
 
 export default configureWebpush;

@@ -285,13 +285,14 @@ export const addListing = async (req, res) => {
 export const renewListing = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const { productId } = req.params;
+  const userId = req.user._id.toString();
   try {
     if (!req.user) {
       logger.warn('Renew listing failed: No user data in request');
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
-    const { productId } = req.params;
-    const userId = req.user._id.toString();
+   
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing) {
@@ -1531,13 +1532,16 @@ export const getSellerListings = async (req, res) => {
   try {
     const { sellerId } = req.params;
     const listings = await listingModel
-      .find({ 'seller.sellerId': sellerId, verified: 'Verified', isSold: false })
+      .find({ 'seller.sellerId': sellerId })
+      .select('-aiFindings') // Exclude aiFindings field
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
-      .lean();
+      .sort({ createdAt: -1 }); // Optional: Sort by creation date, newest first
+
     if (!listings.length) {
-      logger.warn(`No verified listings found for seller ${sellerId}`);
-      return res.status(404).json({ success: false, message: 'No verified listings found for this seller' });
+      logger.warn(`No listings found for seller ${sellerId}`);
+      return res.status(404).json({ success: false, message: 'No listings found for this seller' });
     }
+
     logger.info(`Fetched ${listings.length} listings for seller ${sellerId}`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
@@ -1545,7 +1549,6 @@ export const getSellerListings = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch seller listings' });
   }
 };
-
 // Get Pending Listings (Admin Only)
 export const getPendingListings = async (req, res) => {
   try {

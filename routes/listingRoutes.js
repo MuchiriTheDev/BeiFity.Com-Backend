@@ -26,6 +26,7 @@ import {
   removeFromCart,
   markAsUnSold,
   updateAllListings,
+  renewListing,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -55,6 +56,7 @@ listingRouter.put('/product/:productId/sold', authUser, markAsSold);
 listingRouter.put('/product/:productId/unsold', authUser, markAsUnSold);
 listingRouter.put('/:productId/promote', authUser, promoteListing);
 listingRouter.put('/:productId/inventory', authUser, updateInventory);
+listingRouter.patch('/:productId/renew', authUser, renewListing);
 
 // Admin Routes
 listingRouter.get('/admin/pending', authUser, getPendingListings);

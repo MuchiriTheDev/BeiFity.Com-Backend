@@ -280,7 +280,6 @@ ListingSchema.pre('save', function (next) {
   next();
 });
 
-// Index for expiration
-ListingSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+ListingSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 2592000 }); // 30 days in seconds
 
 export const listingModel = mongoose.model('Listing', ListingSchema);
