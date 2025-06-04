@@ -28,81 +28,173 @@ export const setupSocketHandlers = (io, socket) => {
   });
 
   socket.on('sendMessage', async (data) => {
-    const { sender, receiver, content, type = 'text', conversationId } = data;
+  const { sender, receiver, content, type = 'text', conversationId } = data;
 
-    if (!sender || !receiver || !content) {
-      logger.error(`Invalid message data: ${JSON.stringify(data)}`);
-      socket.emit('error', { message: 'Invalid message data' });
+  // Validate input data
+  if (!sender || !receiver || !content) {
+    logger.error(`Invalid message data: ${JSON.stringify(data)}`);
+    socket.emit('error', { message: 'Invalid message data' });
+    return;
+  }
+
+  const senderStr = sender.toString();
+  const receiverStr = receiver.toString();
+  const sanitizedContent = sanitizeHtml(content);
+  console.log(`Sanitized content: ${sanitizedContent}`)
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Validate sender
+    const senderUser = await userModel.findById(senderStr).session(session);
+    if (!senderUser) {
+      logger.error(`Sender not found: ${senderStr}`);
+      socket.emit('error', { message: 'Sender not found' });
+      await session.abortTransaction();
       return;
     }
 
-    const senderStr = sender.toString();
-    const receiverStr = receiver.toString();
-    const sanitizedContent = sanitizeHtml(content);
+    // Find or create conversation
+    let conversation = conversationId
+      ? await Conversation.findById(conversationId).session(session)
+      : await Conversation.findOne({
+          participants: { $all: [senderStr, receiverStr] },
+        }).session(session);
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-      // Validate sender
-      const senderUser = await userModel.findById(senderStr).session(session);
-      if (!senderUser) {
-        logger.error(`Sender not found: ${senderStr}`);
-        socket.emit('error', { message: 'Sender not found' });
-        await session.abortTransaction();
-        return;
-      }
-
-      // Find or create conversation
-      let conversation = conversationId
-        ? await Conversation.findById(conversationId).session(session)
-        : await Conversation.findOne({ participants: { $all: [senderStr, receiverStr] } }).session(session);
-
-      if (!conversation) {
-        conversation = new Conversation({
-          participants: [senderStr, receiverStr],
-          messages: [],
-          unreadCount: new Map([[receiverStr, 0]]),
-        });
-      }
-
-      // Create and save new Message document
-      const message = new Message({
-        sender: senderStr,
-        receiver: receiverStr,
-        content: sanitizedContent,
-        type,
-        conversationId: conversation._id, // Set conversationId
-        timestamp: new Date(),
-        isRead: false,
+    if (!conversation) {
+      conversation = new Conversation({
+        participants: [senderStr, receiverStr],
+        messages: [],
+        unreadCount: new Map([[senderStr, 0], [receiverStr, 0]]), // Initialize for both users
+        lastMessageTimestamp: new Date(),
       });
-      await message.save({ session });
+    }
 
-      // Add message ID to conversation
-      conversation.messages.push(message._id);
+    // Create and save new message
+    const message = new Message({
+      sender: senderStr,
+      receiver: receiverStr,
+      content: sanitizedContent,
+      type,
+      conversationId: conversation._id,
+      timestamp: new Date(),
+      isRead: false,
+    });
+    await message.save({ session });
 
-      // Update last message details
-      let lastMessageText = sanitizedContent;
-      if (type === 'image') lastMessageText = 'Sent an image';
-      if (type === 'link') lastMessageText = `Shared a link: ${sanitizedContent.substring(0, 30)}${sanitizedContent.length > 30 ? '...' : ''}`;
+    // Update conversation
+    conversation.messages.push(message._id);
 
-      // Ensure unreadCount is a Map
-      if (!(conversation.unreadCount instanceof Map)) {
-        conversation.unreadCount = new Map(Object.entries(conversation.unreadCount || {}));
-      }
-      const currentUnread = conversation.unreadCount.get(receiverStr) || 0;
-      conversation.unreadCount.set(receiverStr, currentUnread + 1);
+    // Set last message details
+    let lastMessageText = sanitizedContent;
+    if (type === 'image') lastMessageText = 'Sent an image';
+    if (type === 'link') lastMessageText = `Shared a link: ${sanitizedContent.substring(0, 30)}${sanitizedContent.length > 30 ? '...' : ''}`;
+    if(type === 'text') lastMessageText = sanitizedContent;
+    
+    // Ensure unreadCount is a Map
+    if (!(conversation.unreadCount instanceof Map)) {
+      conversation.unreadCount = new Map(Object.entries(conversation.unreadCount || {}));
+    }
 
-      conversation.lastMessage = lastMessageText;
-      conversation.lastMessageTimestamp = new Date();
-      conversation.lastMessageSender = senderStr;
+    // Increment unread count for receiver
+    const currentUnread = conversation.unreadCount.get(receiverStr) || 0;
+    conversation.unreadCount.set(receiverStr, currentUnread + 1);
+    // Ensure sender's unread count is reset or maintained
+    conversation.unreadCount.set(senderStr, conversation.unreadCount.get(senderStr) || 0);
 
-      await conversation.save({ session });
+    conversation.lastMessage = lastMessageText;
+    conversation.lastMessageTimestamp = new Date();
+    conversation.lastMessageSender = senderStr;
 
-     try {
-       // Create notification
+    const saved = await conversation.save({ session });
+
+    // Populate conversation for detailed emission
+    await conversation.populate([
+      { path: 'participants', select: 'personalInfo.fullname personalInfo.profilePicture' },
+      { path: 'lastMessageSender', select: 'personalInfo.fullname personalInfo.profilePicture' },
+    ]);
+
+    // Prepare message data for emission
+    const senderDetails = conversation.participants.find((p) => p._id.toString() === senderStr);
+    const receiverDetails = conversation.participants.find((p) => p._id.toString() === receiverStr);
+
+    const messageData = {
+      _id: message._id.toString(),
+      sender: {
+        _id: senderStr,
+        fullname: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
+        profilePicture: senderDetails?.personalInfo.profilePicture || null,
+      },
+      receiver: {
+        _id: receiverStr,
+        fullname: sanitizeHtml(receiverDetails?.personalInfo.fullname || 'Unknown'),
+        profilePicture: receiverDetails?.personalInfo.profilePicture || null,
+      },
+      content: sanitizedContent,
+      type,
+      timestamp: message.timestamp,
+      isRead: message.isRead,
+      conversationId: conversation._id.toString(),
+    };
+
+    // Prepare updated conversation data
+    const updatedConversation = {
+      _id: conversation._id.toString(),
+      participants: conversation.participants.map((p) => ({
+        _id: p._id.toString(),
+        fullname: sanitizeHtml(p.personalInfo?.fullname || 'Unknown'),
+        profilePicture: p.personalInfo?.profilePicture || null,
+        isOnline: users.has(p._id.toString()),
+      })),
+      messages: conversation.messages.map((msg) => msg.toString()),
+      lastMessage: lastMessageText,
+      lastMessageTimestamp: conversation.lastMessageTimestamp,
+      lastMessageSender: conversation.lastMessageSender
+        ? {
+            _id: conversation.lastMessageSender._id.toString(),
+            fullname: sanitizeHtml(conversation.lastMessageSender.personalInfo?.fullname || 'Unknown'),
+            profilePicture: conversation.lastMessageSender.personalInfo?.profilePicture || null,
+          }
+        : null,
+      unreadCount: Object.fromEntries(conversation.unreadCount),
+      productId: conversation.productId || null,
+    };
+
+    // Emit to receiver
+    const receiverSocket = users.get(receiverStr);
+    if (receiverSocket) {
+      io.to(receiverSocket).emit('receiveMessage', messageData);
+      io.to(receiverSocket).emit('conversationUpdate', updatedConversation);
+      io.to(receiverSocket).emit('newMessageNotification', {
+        conversationId: conversation._id.toString(),
+        sender: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
+        senderId: senderStr,
+        content: lastMessageText,
+        timestamp: message.timestamp,
+        link: `/chat/${senderStr}`,
+      });
+      logger.info(
+        `Emitted receiveMessage, conversationUpdate, and newMessageNotification to receiver ${receiverStr} at socket ${receiverSocket}`
+      );
+    }
+
+    // Emit to sender
+    const senderSocket = users.get(senderStr);
+    if (senderSocket) {
+      io.to(senderSocket).emit('messageSent', {
+        _id: message._id.toString(),
+        conversationId: conversation._id.toString(),
+        timestamp: message.timestamp,
+      });
+      io.to(senderSocket).emit('conversationUpdate', updatedConversation);
+      logger.info(`Emitted messageSent and conversationUpdate to sender ${senderStr} at socket ${senderSocket}`);
+    }
+
+    // Create notification
+    try {
       const mockReq = {
-        user: senderUser, // Pass authenticated user
+        user: senderUser,
         body: {
           userId: receiverStr,
           sender: senderStr,
@@ -114,12 +206,9 @@ export const setupSocketHandlers = (io, socket) => {
         status: (code) => ({
           json: (data) => {
             logger.debug(`Notification response: ${JSON.stringify(data)}`);
-            if (data.success && data.notification) {
-              const receiverSocket = users.get(receiverStr);
-              if (receiverSocket) {
-                io.to(receiverSocket).emit('newNotification', data.notification);
-                logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`);
-              }
+            if (data.success && data.notification && receiverSocket) {
+              io.to(receiverSocket).emit('newNotification', data.notification);
+              logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`);
             }
             return { statusCode: code, data };
           },
@@ -129,106 +218,20 @@ export const setupSocketHandlers = (io, socket) => {
       await createNotification(mockReq, mockRes);
       logger.info(`Notification created for receiver: ${receiverStr}`);
     } catch (error) {
-      console.error(error);
       logger.error(`Error creating notification: ${error.message}`, { stack: error.stack });
       socket.emit('error', { message: 'Failed to create notification' });
     }
 
-      // Populate sender and receiver details
-      await conversation.populate('participants', 'personalInfo.fullname personalInfo.profilePicture');
-      const senderDetails = conversation.participants.find((p) => p._id.toString() === senderStr);
-      const receiverDetails = conversation.participants.find((p) => p._id.toString() === receiverStr);
-      // Prepare message data for emission
-      const messageData = {
-        _id: message._id.toString(),
-        sender: {
-          _id: senderStr,
-          fullname: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
-          profilePicture: senderDetails?.personalInfo.profilePicture || null,
-        },
-        receiver: {
-          _id: receiverStr,
-          fullname: sanitizeHtml(receiverDetails?.personalInfo.fullname || 'Unknown'),
-          profilePicture: receiverDetails?.personalInfo.profilePicture || null,
-        },
-        content: sanitizedContent,
-        type,
-        timestamp: message.timestamp,
-        isRead: message.isRead,
-        conversationId: conversation._id.toString(),
-      };
-
-      // Emit to receiver
-      const receiverSocket = users.get(receiverStr);
-      if (receiverSocket) {
-        io.to(receiverSocket).emit('receiveMessage', messageData);
-        logger.info(`Emitted receiveMessage to receiver ${receiverStr} at socket ${receiverSocket}`);
-      }
-
-      // Emit to sender
-      const senderSocket = users.get(senderStr);
-      if (senderSocket) {
-        io.to(senderSocket).emit('messageSent', {
-          _id: message._id.toString(),
-          conversationId: conversation._id.toString(),
-          timestamp: message.timestamp,
-        });
-        logger.info(`Emitted messageSent to sender ${senderStr} at socket ${senderSocket}`);
-      }
-
-      // Prepare updated conversation data
-      const updatedConversation = {
-        _id: conversation._id.toString(),
-        participants: conversation.participants.map((p) => ({
-          _id: p._id.toString(),
-          fullname: sanitizeHtml(p.personalInfo.fullname),
-          profilePicture: p.personalInfo.profilePicture,
-          isOnline: users.has(p._id.toString()),
-        })),
-        messages: conversation.messages.map((msg) => msg.toString()),
-        lastMessage: conversation.lastMessage,
-        lastMessageTimestamp: conversation.lastMessageTimestamp,
-        lastMessageSender: {
-          _id: senderStr,
-          fullname: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
-          profilePicture: senderDetails?.personalInfo.profilePicture || null,
-        },
-        unreadCount: Object.fromEntries(conversation.unreadCount),
-      };
-
-      // Emit conversation update to participants
-      const participantSockets = conversation.participants
-        .map((p) => users.get(p._id.toString()))
-        .filter((socketId) => socketId);
-      participantSockets.forEach((socketId) => {
-        io.to(socketId).emit('conversationUpdate', updatedConversation);
-        logger.info(`Emitted conversationUpdate to socket ${socketId}`);
-      });
-
-      // Emit new message notification
-      if (receiverSocket) {
-        io.to(receiverSocket).emit('newMessageNotification', {
-          conversationId: conversation._id.toString(),
-          sender: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
-          senderId: senderStr,
-          content: lastMessageText,
-          timestamp: message.timestamp,
-          link: `/chat/${senderDetails?._id}`,
-        });
-        logger.info(`Emitted newMessageNotification to receiver ${receiverStr} at socket ${receiverSocket}`);
-      }
-
-      await session.commitTransaction();
-      logger.info(`Message saved and conversation updated: ${conversation._id}`);
-    } catch (error) {
-      await session.abortTransaction();
-      logger.error(`Error sending message: ${error.message}`, { stack: error.stack, data });
-      socket.emit('error', { message: error.message });
-    } finally {
-      session.endSession();
-    }
-  });
-
+    await session.commitTransaction();
+    logger.info(`Message saved and conversation updated: ${conversation._id}`);
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Error sending message: ${error.message}`, { stack: error.stack, data });
+    socket.emit('error', { message: error.message });
+  } finally {
+    session.endSession();
+  }
+});
   // Other event handlers (unchanged)
   socket.on('userTyping', ({ sender, receiver, conversationId }) => {
     const receiverSocket = users.get(receiver);

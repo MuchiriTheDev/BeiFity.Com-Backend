@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { userModel } from '../models/User.js';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
-import { sendListingNotification } from './listingController.js'; // Import from listingController.js
+import { sendListingNotification } from './listingController.js';
 
 // Constants
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -13,7 +13,7 @@ const MAX_FILES_PER_REQUEST = 10;
 /**
  * Upload Images
  * @route POST /api/cloudinary/upload
- * @desc Upload one or more images to Cloudinary, returning URLs
+ * @desc Upload one or more images to Cloudinary, returning URLs and public_ids
  * @access Private (requires JWT token)
  */
 export const uploadImages = async (req, res) => {
@@ -42,7 +42,7 @@ export const uploadImages = async (req, res) => {
     }
 
     // Validate and upload images
-    const uploadedImageUrls = [];
+    const uploadedImages = [];
     for (const file of files) {
       if (!file.data || !file.mimeType) {
         logger.warn('Upload images failed: Invalid file format', { userId });
@@ -68,8 +68,11 @@ export const uploadImages = async (req, res) => {
         });
       }
 
+      // Ensure base64 data is clean (remove prefix if present)
+      const base64Data = file.data.replace(/^data:image\/\w+;base64,/, '');
+
       // Upload to Cloudinary
-      const uploadResponse = await cloudinary.uploader.upload(file.data, {
+      const uploadResponse = await cloudinary.uploader.upload(`data:${file.mimeType};base64,${base64Data}`, {
         folder: `beifity/users/listings/${userId}`,
         transformation: [
           { width: 800, height: 800, crop: 'limit', quality: 'auto' },
@@ -78,37 +81,42 @@ export const uploadImages = async (req, res) => {
         resource_type: 'image',
       });
 
-      uploadedImageUrls.push(uploadResponse.secure_url);
+      uploadedImages.push({
+        url: uploadResponse.secure_url,
+        public_id: uploadResponse.public_id,
+      });
     }
 
     // Notify user
     await sendListingNotification(
       userId,
       'image_uploaded',
-      `You successfully uploaded ${uploadedImageUrls.length} image(s) to your account.`,
-      null, // No productId since not tied to a specific listing
+      `You successfully uploaded ${uploadedImages.length} image(s) to your account.`,
+      null,
       userId,
       session
     );
 
     await session.commitTransaction();
-    logger.info(`Uploaded ${uploadedImageUrls.length} images by user ${userId}`);
-    logger.debug('Uploaded image URLs', { uploadedImageUrls });
+    logger.info(`Uploaded ${uploadedImages.length} images by user ${userId}`);
+    logger.debug('Uploaded images', { uploadedImages });
     res.status(201).json({
       success: true,
-      message: `${uploadedImageUrls.length} image(s) uploaded successfully`,
-      data: uploadedImageUrls, // Return only URLs to match ListingSchema
+      message: `${uploadedImages.length} image(s) uploaded successfully`,
+      data: uploadedImages, // Return array of { url, public_id }
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error uploading images: ${error.message}`, {
+    const errorMessage = error.message || 'Unknown error during image upload';
+    logger.error(`Error uploading images: ${errorMessage}`, {
       stack: error.stack,
       userId: req.user?._id,
+      body: req.body,
     });
     res.status(500).json({
       success: false,
       message: 'Failed to upload images',
-      error: error.message,
+      error: errorMessage,
     });
   } finally {
     session.endSession();
@@ -150,7 +158,7 @@ export const deleteImage = async (req, res) => {
       userId,
       'image_deleted',
       `You successfully deleted an image from your account.`,
-      null, // No productId
+      null,
       userId,
       session
     );
@@ -163,7 +171,8 @@ export const deleteImage = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error deleting image: ${error.message}`, {
+    const errorMessage = error.message || 'Unknown error during image deletion';
+    logger.error(`Error deleting image: ${errorMessage}`, {
       stack: error.stack,
       userId: req.user?._id,
       public_id: req.body?.public_id,
@@ -171,7 +180,7 @@ export const deleteImage = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete image',
-      error: error.message,
+      error: errorMessage,
     });
   } finally {
     session.endSession();

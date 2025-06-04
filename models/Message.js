@@ -20,6 +20,7 @@ const conversationSchema = new mongoose.Schema({
   unreadCount: { type: Map, of: Number, default: () => new Map() },
   lastMessageTimestamp: { type: Date, default: Date.now },
   lastMessageSender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastMessage : { type: String, required: true }, // Stores the last message content
   productId: { type: String, default: null }, // Links to listingModel.productInfo.productId
 });
 
