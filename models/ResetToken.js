@@ -1,20 +1,20 @@
 import mongoose from 'mongoose';
 
-const ResetTokenSchema = new mongoose.Schema({
+const tokenSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
   },
-  code: {
+  token: {
     type: String,
     required: true,
   },
-  expiresAt: {
+  createdAt: {
     type: Date,
-    required: true,
-    index: { expires: '10m' }, // Automatically delete after 10 minutes
+    default: Date.now,
+    expires: 86400, // 24 hours TTL
   },
 });
 
-export const resetTokenModel = mongoose.model('ResetToken', ResetTokenSchema);
+export const tokenModel = mongoose.model('Token', tokenSchema);
