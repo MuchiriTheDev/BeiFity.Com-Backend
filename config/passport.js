@@ -9,10 +9,11 @@ passport.use(
     {
       clientID: env.CLIENT_ID,
       clientSecret: env.CLIENT_SECRET,
-      callbackURL: `https://beifitycom-backend-production.up.railway.app/api/users/google/callback`,
+      callbackURL: ` http://localhost:4000/api/users/google/callback`,
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
+        console.log("Reached here",profile)
         const email = profile.emails[0].value;
         let user = await userModel.findOne({ 'personalInfo.email': email });
 
@@ -21,8 +22,9 @@ passport.use(
             personalInfo: {
               fullname: profile.displayName,
               email,
+              password: await bcrypt.hash(email, 10), // No password for OAuth users
               profilePicture: profile.photos[0].value,
-              phone: '', // Prompt user to add later
+              phone: '+254712345678', // Prompt user to add later
               verified: true, // Google-verified email
             },
             analytics: { lastActive: new Date() },
@@ -38,8 +40,8 @@ passport.use(
         const token = generateToken(user._id);
         return done(null, { userId: user._id, token });
       } catch (error) {
-        return done(error, null);
         console.error('Google Strategy Error:', error);
+        return done(error, null);
       }
     }
   )
