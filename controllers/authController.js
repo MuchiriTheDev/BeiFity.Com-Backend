@@ -212,8 +212,8 @@ export const signup = async (req, res) => {
           Username: ${newUser.personalInfo.username}<br>
           Phone: ${newUser.personalInfo.phone}<br>
           Referral Code: ${referralCode || 'None'}`,
-          'View User Dashboard',
-          `${env.FRONTEND_URL}/admin/users/${newUser._id}`
+          `Chat with ${newUser.personalInfo.fullname}`,
+          `${env.FRONTEND_URL}/chat/${newUser._id}`
         )
       );
       if (!adminEmailSent) {
@@ -301,7 +301,7 @@ export const verification = async (req, res) => {
           Email: ${user.personalInfo.email}<br>
           Username: ${user.personalInfo.username}<br>
           Phone: ${user.personalInfo.phone}`,
-          'Check User Profile',
+          'Check User Store',
           `${env.FRONTEND_URL}/store/@${user.personalInfo.username}/${user._id}`
         )
       );
