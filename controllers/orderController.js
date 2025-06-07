@@ -172,7 +172,7 @@ const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice, delive
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/chat" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Contact Seller(s)</a>
+                  <a href="${FRONTEND_URL}/orders" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Track Your Order(s)</a>
                 </td>
               </tr>
               <tr>

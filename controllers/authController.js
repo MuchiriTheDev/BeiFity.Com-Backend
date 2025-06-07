@@ -302,7 +302,7 @@ export const verification = async (req, res) => {
           Username: ${user.personalInfo.username}<br>
           Phone: ${user.personalInfo.phone}`,
           'View User Dashboard',
-          `${env.FRONTEND_URL}/admin/users/${user._id}`
+          `${env.FRONTEND_URL}/chat/${user._id}`
         )
       );
       if (!adminEmailSent) {
@@ -323,7 +323,7 @@ export const verification = async (req, res) => {
         `Hello ${user.personalInfo.fullname},`,
         `Congratulations on verifying your email with <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>! You're now ready to start selling. List your first product today and reach thousands of buyers!`,
         'Create Your First Listing',
-        `${env.FRONTEND_URL}/sell`
+        `${env.FRONTEND_URL}/upload-product`
       )
     );
 
