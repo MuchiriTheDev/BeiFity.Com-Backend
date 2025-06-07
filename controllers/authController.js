@@ -301,8 +301,8 @@ export const verification = async (req, res) => {
           Email: ${user.personalInfo.email}<br>
           Username: ${user.personalInfo.username}<br>
           Phone: ${user.personalInfo.phone}`,
-          'View User Dashboard',
-          `${env.FRONTEND_URL}/chat/${user._id}`
+          'Check User Profile',
+          `${env.FRONTEND_URL}/store/@${user.personalInfo.username}/${user._id}`
         )
       );
       if (!adminEmailSent) {
