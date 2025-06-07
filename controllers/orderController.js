@@ -172,13 +172,13 @@ const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice, delive
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/orders" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Track Your Order(s)</a>
+                  <a href="${FRONTEND_URL}/your-orders" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Track Your Order(s)</a>
                 </td>
               </tr>
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Next Steps:</strong> The seller(s) will reach out soon via chat to confirm the order and discuss payment and shipping details. Please verify the product before making any payments.
+                    <strong>Next Steps:</strong> The seller(s) will reach out soon via chat to confirm the order and discuss payment and shipping details. <h1>Please verify the product before making any payments</h1>.
                   </p>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
                     <strong>Need Help?</strong> Check your buyer dashboard or contact our support team if you have any questions.
