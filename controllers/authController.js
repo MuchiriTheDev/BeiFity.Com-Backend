@@ -833,10 +833,10 @@ export const sendVerificationReminderToOne = async (req, res) => {
 
     // Get user ID from request parameters
     const userEmail = req.body.userEmail
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ success: false, message: 'Invalid user ID format' });
+    if (!userEmail) {
+      logger.warn('Verification reminder failed: User email missing');
+      return res.status(400).json({ success: false, message: 'Please provide a user email' });
     }
-
     // Find the specific unverified user
     const user = await userModel.findOne({ 
       "personalInfo.email": userEmail,
