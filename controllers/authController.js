@@ -844,7 +844,7 @@ export const sendVerificationReminderToOne = async (req, res) => {
     }).session(session);
 
     if (!user) {
-      logger.info(`User ${userId} not found or already verified`);
+      logger.info(`User ${userEmail} not found or already verified`);
       return res.status(404).json({ 
         success: false, 
         message: 'User not found or already verified' 
