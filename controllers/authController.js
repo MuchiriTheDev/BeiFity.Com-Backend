@@ -268,7 +268,8 @@ export const verification = async (req, res) => {
     }
 
     // Validate token
-    const verifiedToken = await tokenModel.findOne({ userId: id, token }).session(session);
+    const verifiedToken = await tokenModel.findOne({ userId: id, token: token }).session(session);
+    console.log(`Verification token: ${verifiedToken}`);
     if (!verifiedToken) {
       logger.warn(`Verification failed: Invalid or expired token for user ${id}`);
       return res.status(400).json({ success: false, message: 'Invalid or expired verification link. Please request a new one.' });
@@ -765,7 +766,7 @@ export const sendVerificationReminders = async (req, res) => {
 
         // Send reminder email
         const verificationUrl = `${env.FRONTEND_URL}/users/verify/${user._id}/${verificationToken.token}`;
-        console.log(verificationUrl);
+        console.log(verificationUrl)
         const emailSent = await sendEmail(
           user.personalInfo.email,
           'Don’t Miss Out: Verify Your BeiFity.Com Account Now!',
