@@ -818,3 +818,93 @@ export const sendVerificationReminders = async (req, res) => {
     session.endSession();
   }
 };
+
+export const sendVerificationReminderToOne = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Verify admin privileges
+    const admin = await userModel.findById(req.user?._id).session(session);
+    if (!admin || !admin.personalInfo.isAdmin) {
+      logger.warn(`Unauthorized attempt to send verification reminder by user: ${req.user?._id || 'unknown'}`);
+      return res.status(403).json({ success: false, message: 'Only admins can perform this action' });
+    }
+
+    // Get user ID from request parameters
+    const userEmail = req.body.userEmail
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user ID format' });
+    }
+
+    // Find the specific unverified user
+    const user = await userModel.findOne({ 
+      "personalInfo.email": userEmail,
+      'personalInfo.verified': false 
+    }).session(session);
+
+    if (!user) {
+      logger.info(`User ${userId} not found or already verified`);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found or already verified' 
+      });
+    }
+
+    // Check for existing verification token or create a new one
+    let verificationToken = await tokenModel.findOne({ userId: user._id }).session(session);
+    if (!verificationToken) {
+      verificationToken = new tokenModel({
+        userId: user._id,
+        token: crypto.randomBytes(32).toString('hex'),
+      });
+      await verificationToken.save({ session });
+      logger.debug(`Verification token created for user: ${user._id}`);
+    }
+
+    // Send reminder email
+    const verificationUrl = `${env.FRONTEND_URL}/users/verify/${user._id}/${verificationToken.token}`;
+    console.log(verificationUrl);
+    
+    const emailSent = await sendEmail(
+      user.personalInfo.email,
+      'Don\'t Miss Out: Verify Your BeiFity.Com Account Now!',
+      createEmailTemplate(
+        'Complete Your Email Verification',
+        `Hello ${user.personalInfo.fullname || 'User'},`,
+        `Your journey with <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span> is almost ready to begin! Verifying your email unlocks the full potential of your account, letting you:<br><br>
+        - List and sell your products to thousands of buyers<br>
+        - Connect with a vibrant community of sellers<br>
+        - Access exclusive features and updates<br><br>
+        It only takes a moment to verify your email, and you'll be ready to start selling in no time. Don't wait—click below to complete your verification now!`,
+        'Verify My Email Now',
+        verificationUrl
+      )
+    );
+
+    await session.commitTransaction();
+
+    if (emailSent) {
+      logger.info(`Verification reminder sent to user: ${user._id} (${user.personalInfo.email})`);
+      return res.status(200).json({ 
+        success: true, 
+        message: `Verification reminder sent successfully to ${user.personalInfo.email}` 
+      });
+    } else {
+      logger.warn(`Failed to send verification reminder to user: ${user._id} (${user.personalInfo.email})`);
+      return res.status(500).json({ 
+        success: false, 
+        message: `Failed to send verification reminder to ${user.personalInfo.email}` 
+      });
+    }
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Verification reminder error: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'An error occurred while sending verification reminder. Please try again later.' 
+    });
+  } finally {
+    session.endSession();
+  }
+};
