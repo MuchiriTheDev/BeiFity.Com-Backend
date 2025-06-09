@@ -12,6 +12,7 @@ import {
   googleAuth,
   googleCallback,
   getGoogleUser,
+  sendVerificationReminders,
 } from '../controllers/authController.js';
 import passport from 'passport';
 import { authUser } from '../middlewares/authMiddleware.js';
@@ -26,6 +27,7 @@ authRouter.post('/login', login);
 authRouter.post('/reset', getEmailReset);
 authRouter.post('/reset/verify', codeVerification);
 authRouter.post('/reset/change', passwordChange);
+authRouter.post('/verification', authUser, sendVerificationReminders);
 
 // Private Routes (require authentication)
 authRouter.post('/logout', authUser, logout);

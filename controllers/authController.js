@@ -34,16 +34,16 @@ const createEmailTemplate = (title, greeting, message, buttonText = '', buttonUr
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
       <tr>
         <td align="center">
-          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: left;">
             <!-- Logo -->
             <tr>
-              <td>
+              <td align="center">
                 <img src="https://bei-fity-com.vercel.app/assets/logo-without-Dr_6ibJh.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
               </td>
             </tr>
             <!-- Heading -->
             <tr>
-              <td>
+              <td align="center">
                 <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">${title}</h2>
               </td>
             </tr>
@@ -56,25 +56,25 @@ const createEmailTemplate = (title, greeting, message, buttonText = '', buttonUr
             <!-- Message -->
             <tr>
               <td>
-                <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+                <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px; text-align: left;">${message}</p>
               </td>
             </tr>
             ${buttonText && buttonUrl ? `
             <!-- Button -->
             <tr>
-              <td>
+              <td align="center">
                 <a href="${buttonUrl}" style="display: inline-block; padding: 15px 20px; background-color: #1e40af; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 700; border-radius: 8px; margin-bottom: 30px; transition: background-color 0.3s; background: linear-gradient(90deg, #1e40af, #3b82f6);">${buttonText}</a>
               </td>
             </tr>` : ''}
             <!-- Note -->
             <tr>
               <td>
-                <p style="font-size: 13px; color: #64748b; margin-top: 20px;">If you didn’t initiate this action, please contact our support team.</p>
+                <p style="font-size: 13px; color: #64748b; margin-top: 20px; text-align: left;">If you didn’t sign up for BeiFity.Com, please ignore this email or contact our support team.</p>
               </td>
             </tr>
             <!-- Footer -->
             <tr>
-              <td style="margin-top: 30px;">
+              <td align="center" style="margin-top: 30px;">
                 <p style="font-size: 14px; color: #64748b; margin: 0;">Best regards,</p>
                 <p style="font-weight: 700; color: #fbbf24; font-size: 16px; margin-top: 10px;">Bei<span style="color: #1e40af;">Fity.Com</span></p>
               </td>
@@ -86,7 +86,6 @@ const createEmailTemplate = (title, greeting, message, buttonText = '', buttonUr
   </body>
   </html>
 `;
-
 /**
  * Signup
  * @route POST /api/auth/signup
@@ -720,5 +719,101 @@ export const passwordChange = async (req, res) => {
   } catch (error) {
     logger.error(`Password change error: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'An error occurred during password update. Please try again later.' });
+  }
+};
+/**
+ * Send Verification Reminder Emails
+ * @route POST /api/auth/remind-unverified
+ * @desc Send reminder emails to all unverified users
+ * @access Private (Admin only)
+ */
+export const sendVerificationReminders = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Verify admin privileges
+    const admin = await userModel.findById(req.user?._id).session(session);
+    if (!admin || !admin.personalInfo.isAdmin) {
+      logger.warn(`Unauthorized attempt to send verification reminders by user: ${req.user?._id || 'unknown'}`);
+      return res.status(403).json({ success: false, message: 'Only admins can perform this action' });
+    }
+
+    // Find all unverified users
+    const unverifiedUsers = await userModel.find({ 'personalInfo.verified': false }).session(session);
+    if (unverifiedUsers.length === 0) {
+      logger.info('No unverified users found for reminder emails');
+      return res.status(200).json({ success: true, message: 'No unverified users found' });
+    }
+
+    let emailsSent = 0;
+    const failedEmails = [];
+
+    // Iterate through unverified users
+    for (const user of unverifiedUsers) {
+      try {
+        // Check for existing verification token or create a new one
+        let verificationToken = await tokenModel.findOne({ userId: user._id }).session(session);
+        if (!verificationToken) {
+          verificationToken = new tokenModel({
+            userId: user._id,
+            token: crypto.randomBytes(32).toString('hex'),
+          });
+          await verificationToken.save({ session });
+          logger.debug(`Verification token created for user: ${user._id}`);
+        }
+
+        // Send reminder email
+        const verificationUrl = `${env.FRONTEND_URL}/users/verify/${user._id}/${verificationToken.token}`;
+        console.log(verificationUrl);
+        const emailSent = await sendEmail(
+          user.personalInfo.email,
+          'Don’t Miss Out: Verify Your BeiFity.Com Account Now!',
+          createEmailTemplate(
+            'Complete Your Email Verification',
+            `Hello ${user.personalInfo.fullname || 'User'},`,
+            `Your journey with <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span> is almost ready to begin! Verifying your email unlocks the full potential of your account, letting you:<br><br>
+            - List and sell your products to thousands of buyers<br>
+            - Connect with a vibrant community of sellers<br>
+            - Access exclusive features and updates<br><br>
+            It only takes a moment to verify your email, and you’ll be ready to start selling in no time. Don’t wait—click below to complete your verification now!`,
+            'Verify My Email Now',
+            verificationUrl
+          )
+        );
+
+        if (emailSent) {
+          emailsSent++;
+          logger.info(`Verification reminder sent to user: ${user._id} (${user.personalInfo.email})`);
+        } else {
+          failedEmails.push(user.personalInfo.email);
+          logger.warn(`Failed to send verification reminder to user: ${user._id} (${user.personalInfo.email})`);
+        }
+      } catch (emailError) {
+        failedEmails.push(user.personalInfo.email);
+        logger.error(`Error sending verification reminder to ${user.personalInfo.email}: ${emailError.message}`, { stack: emailError.stack });
+      }
+    }
+
+    await session.commitTransaction();
+
+    // Prepare response
+    const responseMessage =
+      emailsSent === unverifiedUsers.length
+        ? `Successfully sent verification reminders to ${emailsSent} user(s)`
+        : `Sent verification reminders to ${emailsSent} user(s). Failed to send to ${failedEmails.length} user(s): ${failedEmails.join(', ')}`;
+
+    return res.status(200).json({
+      success: true,
+      message: responseMessage,
+      emailsSent,
+      failedEmails,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    logger.error(`Verification reminder error: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'An error occurred while sending verification reminders. Please try again later.' });
+  } finally {
+    session.endSession();
   }
 };
