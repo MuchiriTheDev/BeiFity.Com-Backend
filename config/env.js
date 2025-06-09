@@ -9,7 +9,7 @@ const env = cleanEnv(process.env, {
   FRONTEND_URL: url({ desc: 'Frontend URL', example: 'http://localhost:5173' }),
   BACKEND_URL: url({ desc: 'Backend URL', example: 'https://beifity-backend.up.railway.app' }),
   SESSION_SECRET: str({ desc: 'Session secret for express-session' }),
-  HOST: str({ desc: 'SMTP host', default: 'smtp.gmail.com' }),
+  HOST: str({ desc: 'SMTP host', default: 'smtp.zoho.com' }),
   EMAIL_SERVICE: str({ desc: 'Email service provider', default: 'gmail' }),
   EMAIL_PORT: num({ desc: 'SMTP port', default: 465 }),
   SECURE: bool({ desc: 'SMTP secure connection', default: true }),
