@@ -1,4 +1,3 @@
-
 import { userModel } from '../models/User.js';
 import mongoose from 'mongoose';
 import sanitizeHtml from 'sanitize-html';
@@ -200,6 +199,101 @@ const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice, delive
   `;
 };
 
+// HTML Email Template Function for Admin
+const generateOrderEmailAdmin = (buyerName, items, orderTime, totalPrice, deliveryAddress, orderId, buyerId) => {
+  const sanitizedBuyerName = sanitizeHtml(buyerName);
+  const sanitizedOrderTime = sanitizeHtml(orderTime);
+  const sanitizedCounty = sanitizeHtml(deliveryAddress.county || '');
+  const sanitizedNearestTown = sanitizeHtml(deliveryAddress.nearestTown || '');
+  const sanitizedCountry = sanitizeHtml(deliveryAddress.country || 'Kenya');
+
+  const itemDetails = items.map(item => `
+    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;">
+      <strong>Item Name:</strong> ${sanitizeHtml(item.name)} <br>
+      <strong>Quantity:</strong> ${sanitizeHtml(String(item.quantity))} <br>
+      <strong>Price:</strong> KES ${sanitizeHtml(String(item.price))} <br>
+      <strong>Color:</strong> ${sanitizeHtml(item.color)}${item.size ? ` <br><strong>Size:</strong> ${sanitizeHtml(item.size)}` : ''}
+      <strong>Seller ID:</strong> ${sanitizeHtml(item.sellerId.toString())}
+    </p>
+  `).join('<hr style="border: 1px solid #e5e7eb; margin: 10px 0;">');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Order Placed - Admin Notification</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="${FRONTEND_URL}/assets/logo-without-Dr_6ibJh.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New Order Placed on BeiFity!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Order Notification</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    A new order has been placed on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Below are the details:
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Order Summary (Order ID: ${sanitizeHtml(orderId)})</p>
+                    ${itemDetails}
+                    <p style="font-size: 13px; color: #475569; margin: 10px 0 8px;"><strong>Buyer Name:</strong> ${sanitizedBuyerName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Order Placed On:</strong> ${sanitizedOrderTime}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Total Price:</strong> KES ${sanitizeHtml(String(totalPrice))}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Shipping Address:</strong> ${sanitizedCounty || sanitizedNearestTown ? `${sanitizedCounty}, ${sanitizedNearestTown}, ` : ''}${sanitizedCountry}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/admin/orders" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">View Order Details</a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> Review the order details in the admin dashboard. Contact the buyer or seller(s) if necessary.
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Check the admin dashboard or reach out to the support team.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Keep managing on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 600; font-size: 14px; font-weight: 700;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};
+
 /**
  * Place Order
  * @route POST /api/orders
@@ -255,7 +349,7 @@ export const placeOrder = async (req, res) => {
     }
 
     // Validate deliveryAddress
-    if (!data.deliveryAddress.email) {
+    if (!data.deliveryAddress.email || !validator.isEmail(data.deliveryAddress.email)) {
       logger.warn('Place order failed: Invalid email', { userId: req.user._id });
       return res.status(400).json({ success: false, message: 'Valid email required in delivery address' });
     }
@@ -327,7 +421,6 @@ export const placeOrder = async (req, res) => {
     // Create and save the new order
     const newOrder = new orderModel(orderData);
     const savedOrder = await newOrder.save({ session });
-    console.log(savedOrder)
 
     // Update user's orders and analytics
     await userModel.updateOne(
@@ -341,7 +434,7 @@ export const placeOrder = async (req, res) => {
 
     // Update sellers' and listings' analytics
     for (const item of data.items) {
-      await  listingModel.updateOne(
+      await listingModel.updateOne(
         { 'productInfo.productId': item.productId },
         {
           $inc: { 'analytics.ordersNumber': 1, inventory: -item.quantity },
@@ -371,7 +464,7 @@ export const placeOrder = async (req, res) => {
       sellerItemsMap.get(sellerId).push(item);
     });
 
-    const buyerName = sanitizeHtml(user.personalInfo.fullname || 'Buyer');
+    const buyerName = sanitizeHtml(user.personalInfo?.fullname || 'Buyer');
     const orderTime = savedOrder.createdAt.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
     const totalOrderPrice = savedOrder.totalAmount;
 
@@ -398,7 +491,7 @@ export const placeOrder = async (req, res) => {
 
     // Create buyer notification
     const buyerNotificationReq = {
-      user: { _id: data.customerId },
+      user: { _id: data.customerId, personalInfo: user.personalInfo || {} },
       body: {
         userId: data.customerId,
         sender: data.customerId,
@@ -411,6 +504,8 @@ export const placeOrder = async (req, res) => {
         json: data => {
           if (!data.success) {
             logger.warn(`Failed to create order notification for buyer ${data.customerId}: ${data.message}`, { orderId: savedOrder.orderId });
+          } else {
+            logger.info(`Order notification created for buyer ${data.customerId}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
           }
         },
       }),
@@ -420,7 +515,7 @@ export const placeOrder = async (req, res) => {
     // Send emails and notifications to sellers
     for (const [sellerId, items] of sellerItemsMap) {
       const seller = await userModel.findById(sellerId);
-      if (!seller || !seller.personalInfo.email) {
+      if (!seller || !seller.personalInfo?.email) {
         logger.warn(`Failed to notify seller ${sellerId}: Seller not found or no email`, { orderId: savedOrder.orderId });
         continue;
       }
@@ -451,7 +546,7 @@ export const placeOrder = async (req, res) => {
 
       // Create seller notification
       const sellerNotificationReq = {
-        user: { _id: sellerId },
+        user: { _id: sellerId, personalInfo: seller.personalInfo || {} },
         body: {
           userId: sellerId,
           sender: data.customerId,
@@ -464,11 +559,69 @@ export const placeOrder = async (req, res) => {
           json: data => {
             if (!data.success) {
               logger.warn(`Failed to create order notification for seller ${sellerId}: ${data.message}`, { orderId: savedOrder.orderId });
+            } else {
+              logger.info(`Order notification created for seller ${sellerId}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
             }
           },
         }),
       };
       await createNotification(sellerNotificationReq, sellerNotificationRes);
+    }
+
+    // Notify admins of the new order (via notification and email)
+    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname').lean();
+    if (admins.length > 0) {
+      for (const admin of admins) {
+        // Create admin notification
+        const adminNotificationReq = {
+          user: { _id: admin._id, personalInfo: admin.personalInfo || {} },
+          body: {
+            userId: admin._id,
+            sender: data.customerId,
+            type: 'order',
+            content: `A new order (ID: ${savedOrder.orderId}) has been placed by ${buyerName} for a total of KES ${totalOrderPrice}.`,
+          },
+        };
+        const adminNotificationRes = {
+          status: code => ({
+            json: data => {
+              if (!data.success) {
+                logger.warn(`Failed to create order notification for admin ${admin._id}: ${data.message}`, { orderId: savedOrder.orderId });
+              } else {
+                logger.info(`Order notification created for admin ${admin._id}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
+              }
+            },
+          }),
+        };
+        await createNotification(adminNotificationReq, adminNotificationRes);
+
+        // Send email to admin
+        if (admin.personalInfo?.email) {
+          const adminEmailContent = generateOrderEmailAdmin(
+            buyerName,
+            savedOrder.items,
+            orderTime,
+            totalOrderPrice,
+            savedOrder.deliveryAddress,
+            savedOrder.orderId,
+            data.customerId
+          );
+          const adminEmailSent = await sendEmail(
+            admin.personalInfo.email,
+            `New Order Placed - BeiFity.Com Admin Notification`,
+            adminEmailContent
+          );
+          if (!adminEmailSent) {
+            logger.warn(`Failed to send order email to admin ${admin._id}`, { orderId: savedOrder.orderId });
+          } else {
+            logger.info(`Order email sent to admin ${admin._id}`, { orderId: savedOrder.orderId });
+          }
+        } else {
+          logger.warn(`No email found for admin ${admin._id}`, { orderId: savedOrder.orderId });
+        }
+      }
+    } else {
+      logger.warn('No admins found to notify for new order', { orderId: savedOrder.orderId });
     }
 
     logger.info(`Order placed successfully: ${savedOrder.orderId} by user ${req.user._id}`);
@@ -478,7 +631,6 @@ export const placeOrder = async (req, res) => {
       data: savedOrder,
     });
   } catch (error) {
-    console.error(error)
     await session.abortTransaction();
     if (error instanceof mongoose.Error.ValidationError) {
       logger.warn(`Place order failed: Validation error`, { error: error.errors, userId: req.user?._id });
@@ -495,12 +647,7 @@ export const placeOrder = async (req, res) => {
   }
 };
 
-/**
- * Get Seller's Orders
- * @route POST /api/orders/seller
- * @desc Retrieve orders for a seller
- * @access Private (requires JWT token)
- */
+// Other controller functions (unchanged)
 export const getOrders = async (req, res) => {
   try {
     if (!req.user) {
@@ -570,12 +717,6 @@ export const getOrders = async (req, res) => {
   }
 };
 
-/**
- * Update Order Status
- * @route PATCH /api/orders/status
- * @desc Update status of an order item
- * @access Private (requires JWT token)
- */
 export const updateOrderStatus = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -609,7 +750,7 @@ export const updateOrderStatus = async (req, res) => {
 
     const item = order.items.find(item => item.productId === productId);
     if (!item || item.sellerId.toString() !== userId) {
-      logger.warn(`Update order status failed: Item ${{delegations : { itemId: productId }}}  not found or unauthorized, ${ userId, orderId }`);
+      logger.warn(`Update order status failed: Item ${productId} not found or unauthorized`, { userId, orderId });
       return res.status(403).json({ success: false, message: 'Item not found or not authorized' });
     }
 
@@ -635,7 +776,7 @@ export const updateOrderStatus = async (req, res) => {
     await order.save({ session });
 
     // Update analytics
-    const listing = await  listingModel.findOne({ 'productInfo.productId': productId }).session(session);
+    const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     const sellerUpdate = {};
     const buyerUpdate = {};
 
@@ -664,7 +805,7 @@ export const updateOrderStatus = async (req, res) => {
 
     // Notify buyer
     const buyer = await userModel.findById(order.customerId);
-    if (buyer && buyer.personalInfo.email) {
+    if (buyer && buyer.personalInfo?.email) {
       const emailContent = `
         <!DOCTYPE html>
         <html lang="en">
@@ -685,7 +826,7 @@ export const updateOrderStatus = async (req, res) => {
                   </tr>
                   <tr>
                     <td>
-                      <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Order Update, ${sanitizeHtml(buyer.personalInfo.fullname || 'Buyer')}!</h2>
+                      <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Order Update, ${sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer')}!</h2>
                     </td>
                   </tr>
                   <tr>
@@ -696,7 +837,7 @@ export const updateOrderStatus = async (req, res) => {
                   <tr>
                     <td>
                       <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                        Hi ${sanitizeHtml(buyer.personalInfo.fullname || 'Buyer')}, great news! The status of your order item "<strong>${sanitizeHtml(item.name)}</strong>" (Order ID: ${sanitizeHtml(orderId)}) has been updated to <strong>${sanitizeHtml(status)}</strong>.
+                        Hi ${sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer')}, great news! The status of your order item "<strong>${sanitizeHtml(item.name)}</strong>" (Order ID: ${sanitizeHtml(orderId)}) has been updated to <strong>${sanitizeHtml(status)}</strong>.
                       </p>
                     </td>
                   </tr>
@@ -742,7 +883,7 @@ export const updateOrderStatus = async (req, res) => {
 
     // Create buyer notification
     const notificationReq = {
-      user: { _id: order.customerId },
+      user: { _id: order.customerId, personalInfo: buyer.personalInfo || {} },
       body: {
         userId: order.customerId,
         sender: userId,
@@ -755,6 +896,8 @@ export const updateOrderStatus = async (req, res) => {
         json: data => {
           if (!data.success) {
             logger.warn(`Failed to create status notification for buyer ${order.customerId}: ${data.message}`, { orderId });
+          } else {
+            logger.info(`Status notification created for buyer ${order.customerId}`, { orderId, notificationId: data.data?._id });
           }
         },
       }),
@@ -777,12 +920,6 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-/**
- * Get Buyer's Orders
- * @route POST /api/orders/buyer
- * @desc Retrieve orders for a buyer
- * @access Private (requires JWT token)
- */
 export const getBuyerOrders = async (req, res) => {
   try {
     if (!req.user) {
@@ -854,12 +991,6 @@ export const getBuyerOrders = async (req, res) => {
   }
 };
 
-/**
- * Cancel Order Item
- * @route POST /api/orders/cancel
- * @desc Cancel an item in an order
- * @access Private (requires JWT token)
- */
 export const cancelOrderItem = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -918,7 +1049,7 @@ export const cancelOrderItem = async (req, res) => {
       { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
       { session }
     );
-    await  listingModel.updateOne(
+    await listingModel.updateOne(
       { 'productInfo.productId': item.productId },
       { $inc: { 'analytics.ordersNumber': -1, inventory: item.quantity }, isSold: false },
       { session }
@@ -926,7 +1057,7 @@ export const cancelOrderItem = async (req, res) => {
 
     // Notify seller
     const seller = await userModel.findById(item.sellerId);
-    if (seller && seller.personalInfo.email) {
+    if (seller && seller.personalInfo?.email) {
       const emailContent = `
         <!DOCTYPE html>
         <html lang="en">
@@ -952,7 +1083,7 @@ export const cancelOrderItem = async (req, res) => {
                   </tr>
                   <tr>
                     <td>
-                      <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Hi ${sanitizeHtml(seller.personalInfo.fullname || 'Seller')},</p>
+                      <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Hi ${sanitizeHtml(seller.personalInfo?.fullname || 'Seller')},</p>
                     </td>
                   </tr>
                   <tr>
@@ -1001,7 +1132,7 @@ export const cancelOrderItem = async (req, res) => {
 
     // Create seller notification
     const notificationReq = {
-      user: { _id: item.sellerId },
+      user: { _id: item.sellerId, personalInfo: seller.personalInfo || {} },
       body: {
         userId: item.sellerId,
         sender: customerId,
@@ -1014,6 +1145,8 @@ export const cancelOrderItem = async (req, res) => {
         json: data => {
           if (!data.success) {
             logger.warn(`Failed to create cancellation notification for seller ${item.sellerId}: ${data.message}`, { orderId });
+          } else {
+            logger.info(`Cancellation notification created for seller ${item.sellerId}`, { orderId, notificationId: data.data?._id });
           }
         },
       }),
@@ -1022,7 +1155,7 @@ export const cancelOrderItem = async (req, res) => {
 
     // Notify buyer of cancellation
     const buyer = await userModel.findById(customerId);
-    if (buyer && buyer.personalInfo.email) {
+    if (buyer && buyer.personalInfo?.email) {
       const emailContent = `
         <!DOCTYPE html>
         <html lang="en">
@@ -1048,7 +1181,7 @@ export const cancelOrderItem = async (req, res) => {
                   </tr>
                   <tr>
                     <td>
-                      <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Hi ${sanitizeHtml(buyer.personalInfo.fullname || 'Buyer')},</p>
+                      <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Hi ${sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer')},</p>
                     </td>
                   </tr>
                   <tr>
@@ -1097,7 +1230,7 @@ export const cancelOrderItem = async (req, res) => {
 
     // Create buyer cancellation notification
     const buyerNotificationReq = {
-      user: { _id: customerId },
+      user: { _id: customerId, personalInfo: buyer.personalInfo || {} },
       body: {
         userId: customerId,
         sender: customerId,
@@ -1110,6 +1243,8 @@ export const cancelOrderItem = async (req, res) => {
         json: data => {
           if (!data.success) {
             logger.warn(`Failed to create cancellation notification for buyer ${customerId}: ${data.message}`, { orderId });
+          } else {
+            logger.info(`Cancellation notification created for buyer ${customerId}`, { orderId, notificationId: data.data?._id });
           }
         },
       }),

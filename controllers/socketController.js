@@ -28,211 +28,212 @@ export const setupSocketHandlers = (io, socket) => {
   });
 
   socket.on('sendMessage', async (data) => {
-  const { sender, receiver, content, type = 'text', conversationId } = data;
+    const { sender, receiver, content, type = 'text', conversationId } = data;
 
-  // Validate input data
-  if (!sender || !receiver || !content) {
-    logger.error(`Invalid message data: ${JSON.stringify(data)}`);
-    socket.emit('error', { message: 'Invalid message data' });
-    return;
-  }
-
-  const senderStr = sender.toString();
-  const receiverStr = receiver.toString();
-  const sanitizedContent = sanitizeHtml(content);
-  console.log(`Sanitized content: ${sanitizedContent}`)
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // Validate sender
-    const senderUser = await userModel.findById(senderStr).session(session);
-    if (!senderUser) {
-      logger.error(`Sender not found: ${senderStr}`);
-      socket.emit('error', { message: 'Sender not found' });
-      await session.abortTransaction();
+    // Validate input data
+    if (!sender || !receiver || !content) {
+      logger.error(`Invalid message data: ${JSON.stringify(data)}`);
+      socket.emit('error', { message: 'Invalid message data' });
       return;
     }
 
-    // Find or create conversation
-    let conversation = conversationId
-      ? await Conversation.findById(conversationId).session(session)
-      : await Conversation.findOne({
-          participants: { $all: [senderStr, receiverStr] },
-        }).session(session);
+    const senderStr = sender.toString();
+    const receiverStr = receiver.toString();
+    const sanitizedContent = sanitizeHtml(content);
 
-    if (!conversation) {
-      conversation = new Conversation({
-        participants: [senderStr, receiverStr],
-        messages: [],
-        unreadCount: new Map([[senderStr, 0], [receiverStr, 0]]), // Initialize for both users
-        lastMessageTimestamp: new Date(),
-      });
-    }
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    // Create and save new message
-    const message = new Message({
-      sender: senderStr,
-      receiver: receiverStr,
-      content: sanitizedContent,
-      type,
-      conversationId: conversation._id,
-      timestamp: new Date(),
-      isRead: false,
-    });
-    await message.save({ session });
-
-    // Update conversation
-    conversation.messages.push(message._id);
-
-    // Set last message details
-    let lastMessageText = sanitizedContent;
-    if (type === 'image') lastMessageText = 'Sent an image';
-    if (type === 'link') lastMessageText = `Shared a link: ${sanitizedContent.substring(0, 30)}${sanitizedContent.length > 30 ? '...' : ''}`;
-    if(type === 'text') lastMessageText = sanitizedContent;
-    
-    // Ensure unreadCount is a Map
-    if (!(conversation.unreadCount instanceof Map)) {
-      conversation.unreadCount = new Map(Object.entries(conversation.unreadCount || {}));
-    }
-
-    // Increment unread count for receiver
-    const currentUnread = conversation.unreadCount.get(receiverStr) || 0;
-    conversation.unreadCount.set(receiverStr, currentUnread + 1);
-    // Ensure sender's unread count is reset or maintained
-    conversation.unreadCount.set(senderStr, conversation.unreadCount.get(senderStr) || 0);
-
-    conversation.lastMessage = lastMessageText;
-    conversation.lastMessageTimestamp = new Date();
-    conversation.lastMessageSender = senderStr;
-
-    const saved = await conversation.save({ session });
-
-    // Populate conversation for detailed emission
-    await conversation.populate([
-      { path: 'participants', select: 'personalInfo.fullname personalInfo.profilePicture' },
-      { path: 'lastMessageSender', select: 'personalInfo.fullname personalInfo.profilePicture' },
-    ]);
-
-    // Prepare message data for emission
-    const senderDetails = conversation.participants.find((p) => p._id.toString() === senderStr);
-    const receiverDetails = conversation.participants.find((p) => p._id.toString() === receiverStr);
-
-    const messageData = {
-      _id: message._id.toString(),
-      sender: {
-        _id: senderStr,
-        fullname: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
-        profilePicture: senderDetails?.personalInfo.profilePicture || null,
-      },
-      receiver: {
-        _id: receiverStr,
-        fullname: sanitizeHtml(receiverDetails?.personalInfo.fullname || 'Unknown'),
-        profilePicture: receiverDetails?.personalInfo.profilePicture || null,
-      },
-      content: sanitizedContent,
-      type,
-      timestamp: message.timestamp,
-      isRead: message.isRead,
-      conversationId: conversation._id.toString(),
-    };
-
-    // Prepare updated conversation data
-    const updatedConversation = {
-      _id: conversation._id.toString(),
-      participants: conversation.participants.map((p) => ({
-        _id: p._id.toString(),
-        fullname: sanitizeHtml(p.personalInfo?.fullname || 'Unknown'),
-        profilePicture: p.personalInfo?.profilePicture || null,
-        isOnline: users.has(p._id.toString()),
-      })),
-      messages: conversation.messages.map((msg) => msg.toString()),
-      lastMessage: lastMessageText,
-      lastMessageTimestamp: conversation.lastMessageTimestamp,
-      lastMessageSender: conversation.lastMessageSender
-        ? {
-            _id: conversation.lastMessageSender._id.toString(),
-            fullname: sanitizeHtml(conversation.lastMessageSender.personalInfo?.fullname || 'Unknown'),
-            profilePicture: conversation.lastMessageSender.personalInfo?.profilePicture || null,
-          }
-        : null,
-      unreadCount: Object.fromEntries(conversation.unreadCount),
-      productId: conversation.productId || null,
-    };
-
-    // Emit to receiver
-    const receiverSocket = users.get(receiverStr);
-    if (receiverSocket) {
-      io.to(receiverSocket).emit('receiveMessage', messageData);
-      io.to(receiverSocket).emit('conversationUpdate', updatedConversation);
-      io.to(receiverSocket).emit('newMessageNotification', {
-        conversationId: conversation._id.toString(),
-        sender: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
-        senderId: senderStr,
-        content: lastMessageText,
-        timestamp: message.timestamp,
-        link: `/chat/${senderStr}`,
-      });
-      logger.info(
-        `Emitted receiveMessage, conversationUpdate, and newMessageNotification to receiver ${receiverStr} at socket ${receiverSocket}`
-      );
-    }
-
-    // Emit to sender
-    const senderSocket = users.get(senderStr);
-    if (senderSocket) {
-      io.to(senderSocket).emit('messageSent', {
-        _id: message._id.toString(),
-        conversationId: conversation._id.toString(),
-        timestamp: message.timestamp,
-      });
-      io.to(senderSocket).emit('conversationUpdate', updatedConversation);
-      logger.info(`Emitted messageSent and conversationUpdate to sender ${senderStr} at socket ${senderSocket}`);
-    }
-
-    // Create notification
     try {
-      const mockReq = {
-        user: senderUser,
-        body: {
-          userId: receiverStr,
-          sender: senderStr,
-          type: 'message',
-          content: `New message from ${sanitizeHtml(senderUser.personalInfo.fullname)}: ${sanitizedContent}`,
+      // Validate sender
+      const senderUser = await userModel.findById(senderStr).session(session);
+      if (!senderUser) {
+        logger.error(`Sender not found: ${senderStr}`);
+        socket.emit('error', { message: 'Sender not found' });
+        await session.abortTransaction();
+        return;
+      }
+
+      // Find or create conversation
+      let conversation = conversationId
+        ? await Conversation.findById(conversationId).session(session)
+        : await Conversation.findOne({
+            participants: { $all: [senderStr, receiverStr] },
+          }).session(session);
+
+      if (!conversation) {
+        conversation = new Conversation({
+          participants: [senderStr, receiverStr],
+          messages: [],
+          unreadCount: new Map([[senderStr, 0], [receiverStr, 0]]),
+          lastMessageTimestamp: new Date(),
+        });
+      }
+
+      // Create and save new message
+      const message = new Message({
+        sender: senderStr,
+        receiver: receiverStr,
+        content: sanitizedContent,
+        type,
+        conversationId: conversation._id,
+        timestamp: new Date(),
+        isRead: false,
+      });
+      await message.save({ session });
+
+      // Update conversation
+      conversation.messages.push(message._id);
+
+      // Set last message details
+      let lastMessageText = sanitizedContent;
+      if (type === 'image') lastMessageText = 'Sent an image';
+      if (type === 'link') lastMessageText = `Shared a link: ${sanitizedContent.substring(0, 30)}${sanitizedContent.length > 30 ? '...' : ''}`;
+      if (type === 'text') lastMessageText = sanitizedContent;
+
+      // Ensure unreadCount is a Map
+      if (!(conversation.unreadCount instanceof Map)) {
+        conversation.unreadCount = new Map(Object.entries(conversation.unreadCount || {}));
+      }
+
+      // Increment unread count for receiver
+      const currentUnread = conversation.unreadCount.get(receiverStr) || 0;
+      conversation.unreadCount.set(receiverStr, currentUnread + 1);
+      conversation.unreadCount.set(senderStr, conversation.unreadCount.get(senderStr) || 0);
+
+      conversation.lastMessage = lastMessageText;
+      conversation.lastMessageTimestamp = new Date();
+      conversation.lastMessageSender = senderStr;
+
+      await conversation.save({ session });
+
+      // Populate conversation for detailed emission
+      await conversation.populate([
+        { path: 'participants', select: 'personalInfo.fullname personalInfo.profilePicture' },
+        { path: 'lastMessageSender', select: 'personalInfo.fullname personalInfo.profilePicture' },
+      ]);
+
+      // Prepare message data for emission
+      const senderDetails = conversation.participants.find((p) => p._id.toString() === senderStr);
+      const receiverDetails = conversation.participants.find((p) => p._id.toString() === receiverStr);
+
+      const messageData = {
+        _id: message._id.toString(),
+        sender: {
+          _id: senderStr,
+          fullname: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
+          profilePicture: senderDetails?.personalInfo.profilePicture || null,
         },
+        receiver: {
+          _id: receiverStr,
+          fullname: sanitizeHtml(receiverDetails?.personalInfo.fullname || 'Unknown'),
+          profilePicture: receiverDetails?.personalInfo.profilePicture || null,
+        },
+        content: sanitizedContent,
+        type,
+        timestamp: message.timestamp,
+        isRead: message.isRead,
+        conversationId: conversation._id.toString(),
       };
-      const mockRes = {
-        status: (code) => ({
-          json: (data) => {
-            logger.debug(`Notification response: ${JSON.stringify(data)}`);
-            if (data.success && data.notification && receiverSocket) {
-              io.to(receiverSocket).emit('newNotification', data.notification);
-              logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`);
+
+      // Prepare updated conversation data
+      const updatedConversation = {
+        _id: conversation._id.toString(),
+        participants: conversation.participants.map((p) => ({
+          _id: p._id.toString(),
+          fullname: sanitizeHtml(p.personalInfo?.fullname || 'Unknown'),
+          profilePicture: p.personalInfo?.profilePicture || null,
+          isOnline: users.has(p._id.toString()),
+        })),
+        messages: conversation.messages.map((msg) => msg.toString()),
+        lastMessage: lastMessageText,
+        lastMessageTimestamp: conversation.lastMessageTimestamp,
+        lastMessageSender: conversation.lastMessageSender
+          ? {
+              _id: conversation.lastMessageSender._id.toString(),
+              fullname: sanitizeHtml(conversation.lastMessageSender.personalInfo?.fullname || 'Unknown'),
+              profilePicture: conversation.lastMessageSender.personalInfo?.profilePicture || null,
             }
-            return { statusCode: code, data };
-          },
-        }),
+          : null,
+        unreadCount: Object.fromEntries(conversation.unreadCount),
+        productId: conversation.productId || null,
       };
 
-      await createNotification(mockReq, mockRes);
-      logger.info(`Notification created for receiver: ${receiverStr}`);
-    } catch (error) {
-      logger.error(`Error creating notification: ${error.message}`, { stack: error.stack });
-      socket.emit('error', { message: 'Failed to create notification' });
-    }
+      // Emit to receiver
+      const receiverSocket = users.get(receiverStr);
+      if (receiverSocket) {
+        io.to(receiverSocket).emit('receiveMessage', messageData);
+        io.to(receiverSocket).emit('conversationUpdate', updatedConversation);
+        io.to(receiverSocket).emit('newMessageNotification', {
+          conversationId: conversation._id.toString(),
+          sender: sanitizeHtml(senderDetails?.personalInfo.fullname || 'Unknown'),
+          senderId: senderStr,
+          content: lastMessageText,
+          timestamp: message.timestamp,
+          link: `/chat/${senderStr}`,
+        });
+        logger.info(
+          `Emitted receiveMessage, conversationUpdate, and newMessageNotification to receiver ${receiverStr} at socket ${receiverSocket}`
+        );
+      }
 
-    await session.commitTransaction();
-    logger.info(`Message saved and conversation updated: ${conversation._id}`);
-  } catch (error) {
-    await session.abortTransaction();
-    logger.error(`Error sending message: ${error.message}`, { stack: error.stack, data });
-    socket.emit('error', { message: error.message });
-  } finally {
-    session.endSession();
-  }
-});
-  // Other event handlers (unchanged)
+      // Emit to sender
+      const senderSocket = users.get(senderStr);
+      if (senderSocket) {
+        io.to(senderSocket).emit('messageSent', {
+          _id: message._id.toString(),
+          conversationId: conversation._id.toString(),
+          timestamp: message.timestamp,
+        });
+        io.to(senderSocket).emit('conversationUpdate', updatedConversation);
+        logger.info(`Emitted messageSent and conversationUpdate to sender ${senderStr} at socket ${senderSocket}`);
+      }
+
+      // Create notification with web push
+      try {
+        const mockReq = {
+          user: {
+            _id: senderStr,
+            personalInfo: senderUser.personalInfo || { fullname: 'Unknown', isAdmin: false },
+          },
+          body: {
+            userId: receiverStr,
+            sender: senderStr,
+            type: 'message',
+            content: `New message from ${sanitizeHtml(senderUser.personalInfo?.fullname || 'Unknown')}: ${lastMessageText}`,
+          },
+        };
+        const mockRes = {
+          status: (code) => ({
+            json: (data) => {
+              logger.debug(`Notification response: ${JSON.stringify(data)}`);
+              if (data.success && data.data && receiverSocket) {
+                io.to(receiverSocket).emit('newNotification', data.data);
+                logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`, { notificationId: data.data._id });
+              }
+              return { statusCode: code, data };
+            },
+          }),
+        };
+
+        await createNotification(mockReq, mockRes);
+        logger.info(`Notification created for message to receiver ${receiverStr}`, { conversationId: conversation._id, messageId: message._id });
+      } catch (error) {
+        logger.error(`Error creating message notification: ${error.message}`, { stack: error.stack, sender: senderStr, receiver: receiverStr });
+        socket.emit('error', { message: 'Failed to create message notification' });
+      }
+
+      await session.commitTransaction();
+      logger.info(`Message saved and conversation updated: ${conversation._id}`, { messageId: message._id });
+    } catch (error) {
+      await session.abortTransaction();
+      logger.error(`Error sending message: ${error.message}`, { stack: error.stack, data });
+      socket.emit('error', { message: error.message });
+    } finally {
+      session.endSession();
+    }
+  });
+
   socket.on('userTyping', ({ sender, receiver, conversationId }) => {
     const receiverSocket = users.get(receiver);
     if (receiverSocket) {
@@ -249,125 +250,123 @@ export const setupSocketHandlers = (io, socket) => {
     }
   });
 
-socket.on('markMessagesRead', async ({ conversationId, userId }) => {
-  const maxRetries = 3;
-  let attempt = 0;
+  socket.on('markMessagesRead', async ({ conversationId, userId }) => {
+    const maxRetries = 3;
+    let attempt = 0;
 
-  while (attempt < maxRetries) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      // Validate inputs
-      if (!mongoose.Types.ObjectId.isValid(conversationId) || !mongoose.Types.ObjectId.isValid(userId)) {
-        logger.error(`Invalid conversationId ${conversationId} or userId ${userId}`);
-        socket.emit('error', { message: 'Invalid conversationId or userId' });
-        await session.abortTransaction();
-        return;
-      }
+    while (attempt < maxRetries) {
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        // Validate inputs
+        if (!mongoose.Types.ObjectId.isValid(conversationId) || !mongoose.Types.ObjectId.isValid(userId)) {
+          logger.error(`Invalid conversationId ${conversationId} or userId ${userId}`);
+          socket.emit('error', { message: 'Invalid conversationId or userId' });
+          await session.abortTransaction();
+          return;
+        }
 
-      // Find conversation
-      const conversation = await Conversation.findById(conversationId)
-        .session(session);
+        // Find conversation
+        const conversation = await Conversation.findById(conversationId).session(session);
+        if (!conversation) {
+          logger.error(`Conversation not found for ID: ${conversationId}`);
+          socket.emit('error', { message: 'Conversation not found' });
+          await session.abortTransaction();
+          return;
+        }
 
-      if (!conversation) {
-        logger.error(`Conversation not found for ID: ${conversationId}`);
-        socket.emit('error', { message: 'Conversation not found' });
-        await session.abortTransaction();
-        return;
-      }
+        // Find unread messages for the user
+        const unreadMessages = await Message.find({
+          conversationId,
+          receiver: userId,
+          isRead: false,
+        }).session(session);
 
-      // Find unread messages for the user
-      const unreadMessages = await Message.find({
-        conversationId,
-        receiver: userId,
-        isRead: false,
-      }).session(session);
+        if (unreadMessages.length === 0) {
+          logger.info(`No unread messages to mark as read for user ${userId} in conversation ${conversationId}`);
+          await session.commitTransaction();
+          return;
+        }
 
-      if (unreadMessages.length === 0) {
-        logger.info(`No unread messages to mark as read for user ${userId} in conversation ${conversationId}`);
+        const messageIds = unreadMessages.map((msg) => msg._id);
+
+        // Update messages to mark as read
+        await Message.updateMany(
+          { _id: { $in: messageIds } },
+          { $set: { isRead: true } },
+          { session }
+        );
+
+        // Reset unread count for the user
+        conversation.unreadCount.set(userId, 0);
+        await conversation.save({ session });
+
+        // Populate conversation for updated data
+        const populatedConversation = await Conversation.findById(conversationId)
+          .populate('participants', 'personalInfo.fullname personalInfo.profilePicture')
+          .populate('lastMessageSender', 'personalInfo.fullname personalInfo.profilePicture')
+          .lean()
+          .session(session);
+
+        // Prepare updated conversation data
+        const updatedConversation = {
+          _id: conversation._id.toString(),
+          participants: populatedConversation.participants.map((p) => ({
+            _id: p._id.toString(),
+            fullname: sanitizeHtml(p.personalInfo.fullname),
+            profilePicture: p.personalInfo.profilePicture,
+            isOnline: users.has(p._id.toString()),
+          })),
+          messages: conversation.messages.map((msg) => msg.toString()),
+          lastMessage: populatedConversation.lastMessage,
+          lastMessageTimestamp: populatedConversation.lastMessageTimestamp,
+          lastMessageSender: populatedConversation.lastMessageSender
+            ? {
+                _id: populatedConversation.lastMessageSender._id.toString(),
+                fullname: sanitizeHtml(populatedConversation.lastMessageSender.personalInfo.fullname),
+                profilePicture: populatedConversation.lastMessageSender.personalInfo.profilePicture,
+              }
+            : null,
+          unreadCount: Object.fromEntries(conversation.unreadCount),
+        };
+
+        // Emit to all participants
+        const participantSockets = populatedConversation.participants
+          .map((user) => users.get(user._id.toString()))
+          .filter((socketId) => socketId);
+
+        if (participantSockets.length > 0) {
+          io.to(participantSockets).emit('messagesRead', {
+            conversationId: conversationId.toString(),
+            messageIds: messageIds.map((id) => id.toString()),
+            userId,
+            timestamp: new Date(),
+          });
+          io.to(participantSockets).emit('conversationUpdate', updatedConversation);
+          logger.info(`Emitted messagesRead and conversationUpdate to sockets ${participantSockets.join(', ')}`);
+        }
+
         await session.commitTransaction();
+        logger.info(`Marked ${messageIds.length} messages as read for user ${userId} in conversation ${conversationId}`);
+        return; // Success, exit the retry loop
+      } catch (error) {
+        await session.abortTransaction();
+        if (error.errorLabels && error.errorLabels.includes('TransientTransactionError') && attempt < maxRetries - 1) {
+          attempt++;
+          logger.warn(`Retrying markMessagesRead (attempt ${attempt + 1}) due to TransientTransactionError: ${error.message}`);
+          continue; // Retry the transaction
+        }
+        logger.error(`Error marking messages read: ${error.message}`, { stack: error.stack });
+        socket.emit('error', { message: error.message });
         return;
+      } finally {
+        session.endSession();
       }
-
-      const messageIds = unreadMessages.map((msg) => msg._id);
-
-      // Update messages to mark as read
-      await Message.updateMany(
-        { _id: { $in: messageIds } },
-        { $set: { isRead: true } },
-        { session }
-      );
-
-      // Reset unread count for the user
-      conversation.unreadCount.set(userId, 0);
-      await conversation.save({ session });
-
-      // Populate conversation for updated data
-      const populatedConversation = await Conversation.findById(conversationId)
-        .populate('participants', 'personalInfo.fullname personalInfo.profilePicture')
-        .populate('lastMessageSender', 'personalInfo.fullname personalInfo.profilePicture')
-        .lean()
-        .session(session);
-
-      // Prepare updated conversation data
-      const updatedConversation = {
-        _id: conversation._id.toString(),
-        participants: populatedConversation.participants.map((p) => ({
-          _id: p._id.toString(),
-          fullname: sanitizeHtml(p.personalInfo.fullname),
-          profilePicture: p.personalInfo.profilePicture,
-          isOnline: users.has(p._id.toString()),
-        })),
-        messages: conversation.messages.map((msg) => msg.toString()),
-        lastMessage: populatedConversation.lastMessage,
-        lastMessageTimestamp: populatedConversation.lastMessageTimestamp,
-        lastMessageSender: populatedConversation.lastMessageSender
-          ? {
-              _id: populatedConversation.lastMessageSender._id.toString(),
-              fullname: sanitizeHtml(populatedConversation.lastMessageSender.personalInfo.fullname),
-              profilePicture: populatedConversation.lastMessageSender.personalInfo.profilePicture,
-            }
-          : null,
-        unreadCount: Object.fromEntries(conversation.unreadCount),
-      };
-
-      // Emit to all participants
-      const participantSockets = populatedConversation.participants
-        .map((user) => users.get(user._id.toString()))
-        .filter((socketId) => socketId);
-
-      if (participantSockets.length > 0) {
-        io.to(participantSockets).emit('messagesRead', {
-          conversationId: conversationId.toString(),
-          messageIds: messageIds.map((id) => id.toString()),
-          userId,
-          timestamp: new Date(),
-        });
-        io.to(participantSockets).emit('conversationUpdate', updatedConversation);
-        logger.info(`Emitted messagesRead and conversationUpdate to sockets ${participantSockets.join(', ')}`);
-      }
-
-      await session.commitTransaction();
-      logger.info(`Marked ${messageIds.length} messages as read for user ${userId} in conversation ${conversationId}`);
-      return; // Success, exit the retry loop
-    } catch (error) {
-      await session.abortTransaction();
-      if (error.errorLabels && error.errorLabels.includes('TransientTransactionError') && attempt < maxRetries - 1) {
-        attempt++;
-        logger.warn(`Retrying markMessagesRead (attempt ${attempt + 1}) due to TransientTransactionError: ${error.message}`);
-        continue; // Retry the transaction
-      }
-      logger.error(`Error marking messages read: ${error.message}`, { stack: error.stack });
-      socket.emit('error', { message: error.message });
-      return;
-    } finally {
-      session.endSession();
     }
-  }
 
-  logger.error(`Failed to mark messages read after ${maxRetries} attempts for user ${userId} in conversation ${conversationId}`);
-  socket.emit('error', { message: 'Failed to mark messages read after multiple attempts' });
-});
+    logger.error(`Failed to mark messages read after ${maxRetries} attempts for user ${userId} in conversation ${conversationId}`);
+    socket.emit('error', { message: 'Failed to mark messages read after multiple attempts' });
+  });
 
   socket.on('disconnect', () => {
     let disconnectedUser = null;

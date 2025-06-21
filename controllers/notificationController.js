@@ -83,6 +83,8 @@ const getNotificationUrl = (type, sender, notificationId) => {
     case 'message':
       return `/chat/${sender}`; // Sender is userId
     case 'order':
+    case 'order_status':
+    case 'order_cancellation':
       return `/dashboard/orders`;
     case 'new_product':
       return `/product/${sender}`; // Sender is productId
@@ -145,7 +147,7 @@ export const savePushSubscription = async (req, res) => {
 /**
  * Create Notification
  * @route POST /api/notifications
- * @desc Create and send a notification to a user
+ * @desc Create and send a notification to a user with web push
  * @access Private (requires JWT token)
  */
 export const createNotification = async (req, res) => {
@@ -161,7 +163,7 @@ export const createNotification = async (req, res) => {
     const requesterId = req.user._id.toString();
 
     // Validate inputs
-    const validTypes = ['message', 'order', 'new_product', 'report', 'report_status'];
+    const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status'];
     if (!userId || !type || !content) {
       logger.warn(`Create notification failed: Missing required fields`, { requesterId });
       return res.status(400).json({ success: false, message: 'userId, type, and content are required' });
@@ -194,14 +196,15 @@ export const createNotification = async (req, res) => {
       }
     }
 
-    // Authorization: Only admins or sender can create notifications
-    if (!req.user.personalInfo.isAdmin && sender !== requesterId) {
-      logger.warn(`Create notification failed: User ${requesterId} unauthorized to send as ${sender || 'system'}`, { userId });
+    // Authorization: Allow notifications if requester is sender or admin
+    const isAdmin = await userModel.finById(requesterId).isAdmin || false;  
+    if (sender && sender !== requesterId && !isAdmin) {
+      logger.warn(`Create notification failed: User ${requesterId} unauthorized to send as ${sender}`, { userId });
       return res.status(403).json({ success: false, message: 'Unauthorized to create notification' });
     }
 
     // Save notification
-    const notification = new notificanotificationModel({
+    const notification = new notificationModel({
       userId,
       type,
       content: sanitizeHtml(content),
@@ -227,33 +230,35 @@ export const createNotification = async (req, res) => {
     let pushSent = false;
     if (user.pushSubscription) {
       const payload = JSON.stringify({
-        title: type === 'message' && senderDetails ? senderDetails.personalInfo.fullname : 'BeiFity.Com',
+        title: type === 'message' && senderDetails ? `New Message from ${senderDetails.personalInfo.fullname}` : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)}`,
         body: sanitizeHtml(content),
         icon: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
         badge: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
         vibrate: [200, 100, 200],
         timestamp: Date.now(),
         actions: [
-          { action: 'reply', title: 'Reply' },
+          { action: 'view', title: 'View' },
           { action: 'dismiss', title: 'Dismiss' },
         ],
         data: {
           url: getNotificationUrl(type, sender || notification._id, notification._id),
-          notificationId: notification._id,
+          notificationId: notification._id.toString(),
         },
       });
 
       try {
         await webpush.sendNotification(user.pushSubscription, payload);
         pushSent = true;
-        logger.info(`Push notification sent to user ${userId}`, { notificationId: notification._id });
+        logger.info(`Web push notification sent to user ${userId}`, { notificationId: notification._id, type });
       } catch (pushError) {
-        logger.warn(`Failed to send push notification to user ${userId}: ${pushError.message}`, { notificationId: notification._id });
+        logger.warn(`Failed to send web push notification to user ${userId}: ${pushError.message}`, { notificationId: notification._id, type });
       }
+    } else {
+      logger.info(`No push subscription found for user ${userId}, falling back to email`, { notificationId: notification._id, type });
     }
 
     // Fallback to email if push fails or no subscription
-    if (!pushSent && user.personalInfo.email && user.preferences.emailNotifications) {
+    if (!pushSent && user.personalInfo?.email && user.preferences?.emailNotifications) {
       const emailContent = generateNotificationEmail(
         user.personalInfo.fullname || 'User',
         type === 'message' && senderDetails ? `New Message from ${senderDetails.personalInfo.fullname}` : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)} Notification`,
@@ -266,14 +271,14 @@ export const createNotification = async (req, res) => {
         emailContent
       );
       if (emailSent) {
-        logger.info(`Fallback email notification sent to user ${userId}`, { notificationId: notification._id });
+        logger.info(`Fallback email notification sent to user ${userId}`, { notificationId: notification._id, type });
       } else {
-        logger.warn(`Failed to send fallback email to user ${userId}`, { notificationId: notification._id });
+        logger.warn(`Failed to send fallback email to user ${userId}`, { notificationId: notification._id, type });
       }
     }
 
     await session.commitTransaction();
-    logger.info(`Notification created for user ${userId} by ${requesterId}`, { notificationId: notification._id });
+    logger.info(`Notification created for user ${userId} by ${requesterId}`, { notificationId: notification._id, type });
     res.status(201).json({
       success: true,
       message: 'Notification created successfully',
@@ -303,7 +308,7 @@ export const getNotifications = async (req, res) => {
       logger.warn('Get notifications failed: No user data in request');
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
-    if (req.user._id.toString() !== userId && !req.user.personalInfo.isAdmin) {
+    if (req.user._id.toString() !== userId && !req.user.personalInfo?.isAdmin) {
       logger.warn(`Get notifications failed: User ${req.user._id} unauthorized to access notifications for ${userId}`);
       return res.status(403).json({ success: false, message: 'Unauthorized to access these notifications' });
     }
@@ -322,7 +327,8 @@ export const getNotifications = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const [notifications, total] = await Promise.all([
-      notificationModel.find(query)
+      notificationModel
+        .find(query)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
@@ -377,7 +383,7 @@ export const markAsRead = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Notification not found' });
     }
 
-    if (notification.userId.toString() !== req.user._id.toString() && !req.user.personalInfo.isAdmin) {
+    if (notification.userId.toString() !== req.user._id.toString() && !req.user.personalInfo?.isAdmin) {
       logger.warn(`Mark notification as read failed: User ${req.user._id} unauthorized for notification ${notificationId}`);
       return res.status(403).json({ success: false, message: 'Unauthorized to mark this notification' });
     }
@@ -421,7 +427,7 @@ export const markAllAsRead = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    if (req.user._id.toString() !== userId && !req.user.personalInfo.isAdmin) {
+    if (req.user._id.toString() !== userId && !req.user.personalInfo?.isAdmin) {
       logger.warn(`Mark all notifications as read failed: User ${req.user._id} unauthorized for user ${userId}`);
       return res.status(403).json({ success: false, message: 'Unauthorized to mark these notifications' });
     }
