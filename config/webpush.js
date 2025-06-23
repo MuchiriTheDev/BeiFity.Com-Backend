@@ -9,7 +9,7 @@ const configureWebpush = () => {
       process.env.VAPID_PUBLIC_KEY,
       process.env.VAPID_PRIVATE_KEY
     );
-    logger.info('Webpush configured with VAPID keys');
+    logger.info('Webpush configured ');
   } catch (error) {
     logger.error('Webpush configuration error:', error);
   }};

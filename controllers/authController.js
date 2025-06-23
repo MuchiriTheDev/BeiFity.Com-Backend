@@ -908,3 +908,19 @@ export const sendVerificationReminderToOne = async (req, res) => {
     session.endSession();
   }
 };
+
+
+export const getUnverified = async (req, res) => {
+  try {
+    const unverifiedUsers = await userModel.find({ 'personalInfo.verified': false });
+    const users = unverifiedUsers.map(user => ({
+      fullname: user.personalInfo.fullname,
+      email: user.personalInfo.email,
+      phone: user.personalInfo.phone,
+    }));
+    return res.status(200).json({ success: true, data: users });
+  } catch (error) {
+    logger.error(`Error fetching unverified users: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'An error occurred while fetching unverified users. Please try again later.' });
+  }
+}

@@ -14,6 +14,7 @@ import {
   getGoogleUser,
   sendVerificationReminders,
   sendVerificationReminderToOne,
+  getUnverified,
 } from '../controllers/authController.js';
 import passport from 'passport';
 import { authUser } from '../middlewares/authMiddleware.js';
@@ -30,6 +31,7 @@ authRouter.post('/reset/verify', codeVerification);
 authRouter.post('/reset/change', passwordChange);
 authRouter.post('/verification', authUser, sendVerificationReminders);
 authRouter.post('/verify-one', authUser, sendVerificationReminderToOne)
+authRouter.get('/unverified', authUser, getUnverified);
 
 // Private Routes (require authentication)
 authRouter.post('/logout', authUser, logout);
