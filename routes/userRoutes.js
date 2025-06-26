@@ -11,6 +11,7 @@ import {
   removeFromWishlist,
   getReferralLink,
   addSellerReview,
+  getOnlySellers,
 } from '../controllers/userController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -20,6 +21,7 @@ const userRouter = express.Router();
 userRouter.get('/:userId', getUserProfile); // Fetch a user’s public profile
 userRouter.get('/seller/:sellerId', getSeller); // Fetch a seller’s public profile
 userRouter.get('/all/users', getUsers); // Fetch all users (for chat or listing purposes)
+userRouter.get("/sitemap/sellers", getOnlySellers)
 userRouter.post('/people', getSpecificPeople); // Fetch specific users by IDs
 userRouter.post('/update-views/:sellerId', updateProfileViews); // Update profile views
 

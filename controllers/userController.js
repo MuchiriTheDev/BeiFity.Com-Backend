@@ -512,3 +512,26 @@ export const addSellerReview = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to add seller review' });
   }
 };
+
+export const getOnlySellers = async (req, res) =>{
+  try{
+     const users = await userModel.find().select('-personalInfo.password -wishlist  -stats -orders -analytics ');
+     if(!users){
+      return res.status(500).json({ success : false, message :"There is no user"})
+     }
+     const sellers = users.filter(user => user.listings.length > 0)
+
+     logger.info(`Fetched ${sellers.length} sellers`)
+
+     return res.status(200).json({
+      success: true,
+      message: "Successfully fetched sellers",
+      sellers
+     })
+
+
+  } catch (error){
+    logger.error('Error in fetching the sellers for the sitemap')
+    return res.status(500).json({ success: false, message : 'failed to fetch sellers'})
+  }
+}
