@@ -114,6 +114,7 @@ export const savePushSubscription = async (req, res) => {
 
     const { subscription } = req.body;
     const userId = req.user._id.toString();
+    console.log(`Saving push subscription for user ${userId}`, { subscription });
 
     // Validate input
     if (!subscription || typeof subscription !== 'object') {
@@ -123,6 +124,7 @@ export const savePushSubscription = async (req, res) => {
 
     // Validate user
     const user = await userModel.findById(userId).session(session);
+
     if (!user) {
       logger.warn(`Save push subscription failed: User ${userId} not found`);
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -150,7 +152,7 @@ export const savePushSubscription = async (req, res) => {
  * @desc Create and send a notification to a user with web push
  * @access Private (requires JWT token)
  */
-export const createNotification = async (req, res) => {
+export const  createNotification = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -197,7 +199,7 @@ export const createNotification = async (req, res) => {
     }
 
     // Authorization: Allow notifications if requester is sender or admin
-    const isAdmin = await userModel.finById(requesterId).isAdmin || false;  
+    const isAdmin = await userModel.findById(requesterId).session(session).then(user => user?.personalInfo?.isAdmin);
     if (sender && sender !== requesterId && !isAdmin) {
       logger.warn(`Create notification failed: User ${requesterId} unauthorized to send as ${sender}`, { userId });
       return res.status(403).json({ success: false, message: 'Unauthorized to create notification' });
