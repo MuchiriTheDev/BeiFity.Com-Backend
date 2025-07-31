@@ -254,7 +254,7 @@ export const getSeller = async (req, res) => {
  */
 export const getUsers = async (req, res) => {
   try {
-    const users = await userModel.find().select('-personalInfo.password');
+    const users = await userModel.find().select('-personalInfo.password -wishlist -stats -orders -analytics -financial');
     const requiredUsers = users.filter(user => user.personalInfo.verified && user.listings.length > 0);
     const data = requiredUsers.map((user) => ({
       userId: user._id,
