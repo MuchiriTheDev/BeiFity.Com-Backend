@@ -1051,7 +1051,7 @@ export const transferGuestData = async (req, res) => {
 export const getListings = async (req, res) => {
   try {
     const listings = await listingModel
-      .find({ verified: 'Verified', isSold: false , isActive: true })
+      .find({ verified: 'Verified',  isActive: true })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
     

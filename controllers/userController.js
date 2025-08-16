@@ -255,7 +255,7 @@ export const getSeller = async (req, res) => {
 export const getUsers = async (req, res) => {
   try {
     const users = await userModel.find().select('-personalInfo.password -wishlist -stats -orders -analytics -financial');
-    const requiredUsers = users.filter(user => user.personalInfo.verified && user.listings.length > 0);
+    const requiredUsers = users.filter(user => user.personalInfo.verified );
     const data = requiredUsers.map((user) => ({
       userId: user._id,
       fullname: user.personalInfo.fullname,
@@ -266,7 +266,7 @@ export const getUsers = async (req, res) => {
       isFeatured: user.isFeatured,
     }));
 
-    logger.info(`Fetched ${requiredUsers.length} users`);
+    logger.info(`Fetched ${users.length} users`);
     return res.status(200).json({ success: true, data });
   } catch (error) {
     logger.error(`Error fetching users: ${error.message}`, { stack: error.stack });

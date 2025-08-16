@@ -1,4 +1,5 @@
 import express from 'express';
+import NodeCache from 'node-cache';
 import http from 'http';
 import cors from 'cors';
 import bodyParser from 'body-parser';
@@ -26,6 +27,7 @@ import env from './config/env.js';
 import './utils/expireListings.js'
 
 const app = express();
+const cache = new NodeCache({ stdTTL: 3600 });
 
 // Middleware
 app.use(cors({
@@ -41,6 +43,26 @@ app.use(session(sessionConfig));
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(cookieParser());
+
+
+// Caching middleware for specific routes
+const cacheMiddleware = (req, res, next) => {
+    const cacheKey = `${req.method}_${req.originalUrl}`;
+    const cachedData = cache.get(cacheKey);
+
+    if (cachedData) {
+        logger.info(`Cache hit for ${cacheKey}`);
+        return res.set('Cache-Control', 'public, max-age=3600').json(cachedData);
+    }
+
+    // Override res.json to cache the response
+    const originalJson = res.json;
+    res.json = (data) => {
+        cache.set(cacheKey, data);
+        originalJson.call(res, data);
+    };
+    next();
+};
 
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.url}`);
@@ -92,3 +114,5 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
+export { cache };
