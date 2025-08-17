@@ -1527,15 +1527,15 @@ export const updateConversionRate = async (req, res) => {
   }
 };
 
-// Get Seller Listings
 export const getSellerListings = async (req, res) => {
   try {
+    console.log("Seller started fetching listings");
     const { sellerId } = req.params;
     const listings = await listingModel
       .find({ 'seller.sellerId': sellerId })
       .select('-aiFindings') // Exclude aiFindings field
-      .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
-      .sort({ createdAt: -1 }); // Optional: Sort by creation date, newest first
+      .sort({ createdAt: -1 }) // Sort by creation date, newest first
+      .lean(); // Convert to plain JavaScript objects
 
     if (!listings.length) {
       logger.warn(`No listings found for seller ${sellerId}`);
@@ -1545,7 +1545,8 @@ export const getSellerListings = async (req, res) => {
     logger.info(`Fetched ${listings.length} listings for seller ${sellerId}`);
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
-    logger.error(`Error fetching seller listings: ${error.message}`, { stack: error.stack, sellerId });
+    console.log("Error fetching seller listings:", error);
+    logger.error(`Error fetching seller listings: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to fetch seller listings' });
   }
 };

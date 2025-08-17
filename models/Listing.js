@@ -208,7 +208,31 @@ const ListingSchema = new mongoose.Schema({
   },
   analytics: {
     type: AnalyticsSchema,
-    default: () => ({}),
+    default: () => ({
+      views: {
+        total: 0,
+        uniqueViewers: [],
+      },
+      cartAdditions: {
+        total: 0,
+        userIds: [],
+        guestIds: [],
+      },
+      wishlist: {
+        total: 0,
+        userIds: [],
+        guestIds: [],
+      },
+      shared: {
+        total: 0,
+        platforms: {},
+      },
+      reportsReceived: 0,
+      inquiries: 0,
+      negotiationAttempts: 0,
+      ordersNumber: 0,
+      conversionRate: 0,
+    }),
   },
   reviews: {
     type: [ReviewSchema],
