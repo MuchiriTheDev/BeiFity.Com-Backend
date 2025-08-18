@@ -516,7 +516,7 @@ export const addSellerReview = async (req, res) => {
 
 export const getOnlySellers = async (req, res) =>{
   try{
-     const users = await userModel.find().select('-personalInfo.password -wishlist  -stats -orders -analytics ');
+     const users = await userModel.find().select('-personalInfo.password -stats -orders -wishlist -financial -lastseen -preferences -analytics.profileViews').lean();
      if(!users){
       return res.status(500).json({ success : false, message :"There is no user"})
      }
@@ -532,6 +532,7 @@ export const getOnlySellers = async (req, res) =>{
 
 
   } catch (error){
+    console.log(error)
     logger.error('Error in fetching the sellers for the sitemap')
     return res.status(500).json({ success: false, message : 'failed to fetch sellers'})
   }
