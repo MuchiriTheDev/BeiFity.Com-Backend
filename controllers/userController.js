@@ -266,7 +266,7 @@ export const getUsers = async (req, res) => {
       isFeatured: user.isFeatured,
     }));
 
-    logger.info(`Fetched ${users.length} users`);
+    logger.info(`Fetched ${requiredUsers.length} users`);
     return res.status(200).json({ success: true, data });
   } catch (error) {
     logger.error(`Error fetching users: ${error.message}`, { stack: error.stack });
@@ -513,6 +513,61 @@ export const addSellerReview = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to add seller review' });
   }
 };
+
+export const removeSellerReview = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Seller review removal failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to remove a review' });
+    }
+
+    const { sellerId, reviewId } = req.params;
+    const { userId } = req.body;
+
+    if (!sellerId || !reviewId) {
+      logger.warn('Seller review removal failed: Missing sellerId or reviewId', { sellerId, reviewId });
+      return res.status(400).json({ success: false, message: 'sellerId and reviewId are required' });
+    }
+
+    if (userId !== req.user._id.toString()) {
+      console.log(req.user._id.toString(), userId)
+      logger.warn(`Seller review removal failed: User ${req.user._id} attempted to remove review as ${userId}`);
+      return res.status(403).json({ success: false, message: 'Unauthorized: Cannot remove review as another user' });
+    }
+
+    const user = await userModel.findById(sellerId);
+    if (!user) {
+      logger.warn(`Seller review removal failed: Seller ${sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'Seller not found' });
+    }
+
+    const reviewIndex = user.reviews.findIndex((review) => review._id.toString() === reviewId && review.reviewer.toString() === userId);
+    if (reviewIndex === -1) {
+      logger.warn(`Seller review removal failed: Review ${reviewId} not found for seller ${sellerId}`);
+      return res.status(404).json({ success: false, message: 'Review not found' });
+    }
+
+    user.reviews.splice(reviewIndex, 1);
+
+    const totalRatings = user.reviews.reduce((sum, rev) => sum + rev.rating, 0);
+    const averageRating = user.reviews.length > 0 ? (totalRatings / user.reviews.length).toFixed(1) : 0;
+
+    await userModel.findByIdAndUpdate(
+      sellerId,
+      { reviews: user.reviews, 'rating.average': averageRating, 'rating.reviewCount': user.reviews.length },
+      { new: true }
+    );
+
+    logger.info(`Review ${reviewId} removed for seller ${sellerId} by user ${userId}`);
+    return res.status(200).json({
+      success: true,
+      message: 'Seller review removed successfully',
+    });
+  } catch (error) {
+    logger.error(`Error removing seller review: ${error.message}`, { stack: error.stack, sellerId, reviewId, userId });
+    return res.status(500).json({ success: false, message: 'Failed to remove seller review' });
+  }
+}
 
 export const getOnlySellers = async (req, res) =>{
   try{
