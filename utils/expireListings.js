@@ -6,14 +6,14 @@ import { userModel } from '../models/User.js';
 import { emailLogModel } from '../models/EmailLog.js';
 import { sendListingNotification } from '../controllers/listingController.js';
 import { sendEmail } from '../utils/sendEmail.js';
-import { generateMarketingEmail, generateMarketingAdminReportEmail } from '../templates.js';
+import { generateMarketingEmail, generateMarketingAdminReportEmail } from '../utils/Templates.js';
 import logger from './logger.js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import sanitizeHtml from 'sanitize-html';
 
 // Initialize Google Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk');
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const genAI = new GoogleGenerativeAI('AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk');
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 // Sanitize-html configuration (reused from templates.js for consistency)
 const sanitizeConfig = {
