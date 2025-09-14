@@ -122,7 +122,7 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const genAI = new GoogleGenerativeAI("AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk");
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Prepare prompt for AI verification and findings
@@ -309,7 +309,7 @@ export const renewListing = async (req, res) => {
     }
 
     listing.isActive = true;
-    listing.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    listing.expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
     await listing.save({ session });
 
     await userModel.findByIdAndUpdate(
@@ -1050,8 +1050,9 @@ export const transferGuestData = async (req, res) => {
 // Get Listings
 export const getListings = async (req, res) => {
   try {
+    // { verified: 'Verified',  isActive: true }
     const listings = await listingModel
-      .find({ verified: 'Verified',  isActive: true })
+      .find()
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
     
@@ -1710,7 +1711,7 @@ export const updateAllListings = async (req, res) => {
   try {
     // Calculate expiration date (30 days from now)
     const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 360);
 
     // Update all listings
     const updateResult = await listingModel.updateMany(
@@ -1831,3 +1832,32 @@ export const updateAllListings = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to update listings' });
   }
 };
+
+export const checkInventory = async (req, res) => {
+  try {
+    const { items } = req.body; // Expecting an array of { productId, quantity }
+    if (!Array.isArray(items) || items.length === 0) {
+      logger.warn('Check inventory failed: Items array required');
+      return res.status(400).json({ success: false, message: 'Items array required' });
+    }
+    const productIds = items.map(item => item.productId);
+    const listings = await listingModel.find({ 'productInfo.productId': { $in: productIds } }).lean();
+    const inventoryStatus = items.map(item => {
+      const listing = listings.find(l => l.productInfo.productId === item.productId);
+      if (!listing) {
+        return { productId: item.productId, available: false, message: 'Listing not found' };
+      }
+      if (listing.isSold || listing.inventory <= 0) {
+        return { productId: item.productId, available: false, message: 'Out of stock' };
+      }
+      if (item.quantity > listing.inventory) {
+        return { productId: item.productId, available: false, message: `Only ${listing.inventory} left in stock` };
+      }
+      return { productId: item.productId, available: true, message: 'In stock' };
+    });
+    res.status(200).json({ success: true, data: inventoryStatus });
+  } catch (error) { 
+    logger.error(`Error checking inventory: ${error.message}`, { stack: error.stack });
+    res.status(500).json({ success: false, message: 'Failed to check inventory' });
+  }
+}

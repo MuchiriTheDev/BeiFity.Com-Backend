@@ -2,12 +2,12 @@ import mongoose from 'mongoose';
 
 const UserSchema = new mongoose.Schema(
   {
-    // Personal Information (core profile data for trust, marketing, and communication)
+    // Existing personalInfo structure (unchanged)
     personalInfo: {
       username: {
         type: String,
         unique: true,
-        sparse: true, // Allows nulls but enforces uniqueness
+        sparse: true,
         trim: true,
         minlength: 3,
         maxlength: 30,
@@ -37,23 +37,24 @@ const UserSchema = new mongoose.Schema(
       },
       profilePicture: {
         type: String,
-        default: 'https://cdn.vectorstock.com/i/500p/45/59/profile-photo-placeholder-icon-design-in-gray-vector-37114559.jpg',
+        default: 'https://gateway.pinata.cloud/ipfs/bafkreib6itxawtdtqjgf7y3riluof3jeqnlnp4qpav2slr2wt735aqshsu',
       },
       phone: {
         type: String,
-        required: true, // Essential for buyer-seller communication
+        required: true,
         validate: {
           validator: (v) => /^\+?[0-9]{7,15}$/.test(v),
           message: 'Invalid phone number',
         },
-        index: true, // Faster lookups for communication
+        index: true,
       },
+      
       location: {
         country: { type: String, default: 'Kenya' },
-        city: { type: String, default: '' }, // More granular location data
+        city: { type: String, default: '' },
         coordinates: {
           type: { type: String, enum: ['Point'], default: 'Point' },
-          coordinates: { type: [Number], default: [36.8219, -1.2921] }, // [longitude, latitude], Nairobi default
+          coordinates: { type: [Number], default: [36.8219, -1.2921] },
         },
       },
       bio: {
@@ -65,22 +66,32 @@ const UserSchema = new mongoose.Schema(
         facebook: { type: String, default: '' },
         twitter: { type: String, default: '' },
         instagram: { type: String, default: '' },
-        website: { type: String, default: '' }, // Additional marketing link
+        website: { type: String, default: '' },
       },
       profileCompleteness: {
         type: Number,
-        default: 0, // 0-100, calculated based on filled fields
+        default: 0,
+      },
+      subaccount_code: { type: String, default: null }, // Paystack subaccount code
+      recipient_code: { type: String, default: null }, 
+      bankDetails: {
+        bankCode: { type: String }, // Paystack bank code (e.g., for M-Pesa)
+        accountNumber: { type: String }, // M-Pesa number or bank account
+        accountName: { type: String }, // Account holder name
+      },
+      mobileMoneyDetails: {
+        provider: { type: String, enum: ['M-Pesa', null], default: "M-Pesa" }, // M-Pesa provider
+        phoneNumber: { type: String }, // M-Pesa phone number (e.g., +2547XXXXXXXX)
+        accountName: { type: String }, // Name associated with M-Pesa account
       },
       isAdmin: {
         type: Boolean,
-        default: false, // For platform administration
+        default: false,
       },
       deviceToken: { type: String },
     },
     pushSubscription: { type: Object },
-    lastSeen: { type: Date, default: Date.now }, // Last active time
-    // Analytics (detailed metrics for engagement and performance insights)
-      // Analytics (updated with report counters)
+    lastSeen: { type: Date, default: Date.now },
     analytics: {
       totalSales: {
         amount: { type: Number, default: 0 },
@@ -113,52 +124,41 @@ const UserSchema = new mongoose.Schema(
         platforms: { type: Map, of: Number, default: () => new Map() },
       },
       responseTimeAvg: { type: Number, default: 0 },
-      // New fields for reporting
-      reportsSubmitted: { type: Number, default: 0 }, // Number of reports filed by this user
-      reportsReceived: { type: Number, default: 0 }, // Number of reports filed against this user
+      reportsSubmitted: { type: Number, default: 0 },
+      reportsReceived: { type: Number, default: 0 },
     },
-
-    // Rating (user reputation summary)
     rating: {
       average: { type: Number, default: 0, min: 0, max: 5 },
       reviewCount: { type: Number, default: 0 },
     },
-
-    // Relationships (listings, orders, and wishlist)
     listings: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Listing' }],
     orders: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Orders' }],
-    wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Listing' }], // User’s wishlist
-
-    // Stats (quick metrics for activity)
+    wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Listing' }],
     stats: {
       activeListingsCount: { type: Number, default: 0 },
       soldListingsCount: { type: Number, default: 0 },
       pendingOrdersCount: { type: Number, default: 0 },
       completedOrdersCount: { type: Number, default: 0 },
-      failedOrdersCount: { type: Number, default: 0 }, // Orders cancelled or failed
-      listingFeesPaid: { type: Number, default: 0 }, // Total fees paid for listings
+      failedOrdersCount: { type: Number, default: 0 },
+      listingFeesPaid: { type: Number, default: 0 },
     },
-
-    // Marketing and Platform Features
     isFeatured: { type: Boolean, default: false },
     badges: {
       type: [String],
-      enum: ['Top Seller', 'Verified', 'Fast Responder', 'New User', 'Trusted Buyer',"Referrer"],
+      enum: ['Top Seller', 'Verified', 'Fast Responder', 'New User', 'Trusted Buyer', 'Referrer'],
       default: [],
     },
     preferences: {
       emailNotifications: { type: Boolean, default: true },
       smsNotifications: { type: Boolean, default: false },
-      marketingEmails: { type: Boolean, default: true }, // Opt-in for promotions
+      marketingEmails: { type: Boolean, default: true },
     },
     referralCode: {
       type: String,
       unique: true,
-      default: () => `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`, // Unique referral code
+      default: () => `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
     },
-    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // User who referred them
-
-    // Reviews (embedded for reputation)
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     reviews: [
       {
         reviewer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -167,15 +167,15 @@ const UserSchema = new mongoose.Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
-
-    // Financial Tracking (for revenue and payouts)
     financials: {
-      balance: { type: Number, default: 0 }, // Earnings from sales minus fees
+      balance: { type: Number, default: 0 },
       payoutHistory: [
         {
           amount: { type: Number, required: true },
           date: { type: Date, default: Date.now },
-          method: { type: String, enum: ['Bank', 'Mobile', 'PayPal'], required: true },
+          method: { type: String, enum: ['M-Pesa', 'Bank'], required: true },
+          paystackTransferCode: { type: String },
+          status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
         },
       ],
     },
@@ -183,9 +183,8 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Pre-save hooks (unchanged, but ensuring analytics updates are safe)
+// Pre-save hooks (unchanged core logic, adjusted for financials if needed)
 UserSchema.pre('save', function (next) {
-  // Update rating based on reviews
   if (this.isModified('reviews')) {
     const reviews = this.reviews || [];
     const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
@@ -193,7 +192,6 @@ UserSchema.pre('save', function (next) {
     this.rating.reviewCount = reviews.length;
   }
 
-  // Calculate profile completeness
   const fields = [
     this.personalInfo.username,
     this.personalInfo.fullname,
@@ -208,14 +206,11 @@ UserSchema.pre('save', function (next) {
   next();
 });
 
-// Indexes (updated with report-related analytics)
-UserSchema.index({ 'personalInfo.email': 1 });
-UserSchema.index({ 'personalInfo.username': 1 }, { sparse: true });
-UserSchema.index({ 'personalInfo.phone': 1 });
+
 UserSchema.index({ 'personalInfo.location.coordinates': '2dsphere' });
 UserSchema.index({ 'analytics.lastActive': 1 });
 UserSchema.index({ 'stats.listingFeesPaid': 1 });
-UserSchema.index({ 'analytics.reportsReceived': 1 }); // New index for reports received
-UserSchema.index({ 'analytics.reportsSubmitted': 1 }); // New index for reports submitted
+UserSchema.index({ 'analytics.reportsReceived': 1 });
+UserSchema.index({ 'analytics.reportsSubmitted': 1 });
 
 export const userModel = mongoose.model('User', UserSchema);

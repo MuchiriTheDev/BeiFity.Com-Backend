@@ -27,6 +27,7 @@ import {
   markAsUnSold,
   updateAllListings,
   renewListing,
+  checkInventory,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -46,6 +47,7 @@ listingRouter.post('/:productId/wishlist/remove', authUser, removeFromWishlist);
 listingRouter.post('/:productId/cart/add', authUser, addToCart);
 listingRouter.post('/:productId/cart/remove', authUser, removeFromCart);
 listingRouter.put('/:productId/renew', authUser, renewListing);
+listingRouter.post('/check-inventory', authUser, checkInventory);
 
 // Private Routes (authenticated users)
 listingRouter.post('/add', authUser, addListing);
