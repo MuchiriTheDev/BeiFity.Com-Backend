@@ -544,7 +544,7 @@ export const generateRefundEmail = (recipientName, itemName, orderId, refundAmou
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Need Assistance?</strong> Visit your ${isBuyer ? 'buyer' : 'seller'} dashboard or contact our support team at <a href="mailto:${isBuyer ? 'support@beifity.com' : 'customer.care@beifity.com'}" style="color: #1e40af; text-decoration: underline;">${isBuyer ? 'support@beifity.com' : 'customer.care@beifity.com'}</a>.
+                    <strong>Need Assistance?</strong> Visit your ${isBuyer ? 'buyer' : 'seller'} dashboard or contact our support team at <a href="mailto:${isBuyer ? 'customer.care@beifity.com' : 'customer.care@beifity.com'}" style="color: #1e40af; text-decoration: underline;">${isBuyer ? 'customer.care@beifity.com' : 'customer.care@beifity.com'}</a>.
                   </p>
                 </td>
               </tr>
@@ -698,7 +698,7 @@ export const generateTransactionReversalEmail = (recipientName, orderId, itemIds
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Need Assistance?</strong> Visit your ${isBuyer ? 'buyer' : 'seller'} dashboard or contact our support team at <a href="mailto:${isBuyer ? 'support@beifity.com' : 'customer.care@beifity.com'}" style="color: #1e40af; text-decoration: underline;">${isBuyer ? 'support@beifity.com' : 'customer.care@beifity.com'}</a>.
+                    <strong>Need Assistance?</strong> Visit your ${isBuyer ? 'buyer' : 'seller'} dashboard or contact our support team at <a href="mailto:${isBuyer ? 'customer.care@beifity.com' : 'customer.care@beifity.com'}" style="color: #1e40af; text-decoration: underline;">${isBuyer ? 'customer.care@beifity.com' : 'customer.care@beifity.com'}</a>.
                   </p>
                 </td>
               </tr>
@@ -773,7 +773,7 @@ export const generateOrderStatusEmailAdmin = (adminName, itemName, orderId, stat
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Need Assistance?</strong> Contact our support team at <a href="mailto:support@beifity.com" style="color: #1e40af; text-decoration: underline;">support@beifity.com</a>.
+                    <strong>Need Assistance?</strong> Contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
                   </p>
                 </td>
               </tr>
@@ -848,7 +848,7 @@ export const generateOrderCancellationEmailAdmin = (adminName, itemName, orderId
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Need Assistance?</strong> Contact our support team at <a href="mailto:support@beifity.com" style="color: #1e40af; text-decoration: underline;">support@beifity.com</a>.
+                    <strong>Need Assistance?</strong> Contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
                   </p>
                 </td>
               </tr>
@@ -914,7 +914,7 @@ export const generateMarketingEmail = (recipientName, products) => {
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);">
               <!-- Header -->
               <tr>
-                <td style="background-color: #1e40af; padding: 20px; text-align: center; border-radius: 12px 12px 0 0;">
+                <td style="background-color: #f4f7ffff; padding: 20px; text-align: center; border-radius: 12px 12px 0 0;">
                   <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; display: block; margin: 0 auto;">
                   <h1 style="font-size: 22px; font-weight: 700; color: #ffffff; margin: 15px 0 0;">Hello ${sanitizedRecipientName}, Discover Top Picks!</h1>
                 </td>
@@ -937,7 +937,7 @@ export const generateMarketingEmail = (recipientName, products) => {
               <!-- CTA -->
               <tr>
                 <td style="padding: 20px; text-align: center;">
-                  <a href="${FRONTEND_URL}/shop" style="display: inline-block; background-color: #fbbf24; color: #1e293b; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px;">Browse All Products</a>
+                  <a href="${FRONTEND_URL}/collection" style="display: inline-block; background-color: #fbbf24; color: #1e293b; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px;">Browse All Products</a>
                 </td>
               </tr>
               <!-- Footer -->
@@ -947,7 +947,7 @@ export const generateMarketingEmail = (recipientName, products) => {
                     Don't want these emails? <a href="${FRONTEND_URL}/unsubscribe" style="color: #1e40af; text-decoration: underline;">Unsubscribe</a>
                   </p>
                   <p style="font-size: 13px; color: #64748b; margin: 0;">
-                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:support@beifity.com" style="color: #1e40af; text-decoration: underline;">support@beifity.com</a>
+                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>
                   </p>
                   <p style="font-size: 13px; color: #64748b; margin: 10px 0 0;">
                     <span style="color: #1e40af; font-weight: 700;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
@@ -1057,7 +1057,7 @@ export const generateMarketingAdminReportEmail = (products, recipients) => {
               <tr>
                 <td style="padding: 20px; text-align: center; background-color: #f0f4f8; border-radius: 0 0 12px 12px;">
                   <p style="font-size: 13px; color: #64748b; margin: 0;">
-                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:support@beifity.com" style="color: #1e40af; text-decoration: underline;">support@beifity.com</a>
+                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>
                   </p>
                   <p style="font-size: 13px; color: #64748b; margin: 10px 0 0;">
                     <span style="color: #1e40af; font-weight: 700;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>

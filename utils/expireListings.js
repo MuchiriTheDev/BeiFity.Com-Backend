@@ -4,7 +4,6 @@ import cron from 'node-cron';
 import { listingModel } from '../models/Listing.js';
 import { userModel } from '../models/User.js';
 import { emailLogModel } from '../models/EmailLog.js';
-import { sendListingNotification } from '../controllers/listingController.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { generateMarketingEmail, generateMarketingAdminReportEmail } from '../utils/Templates.js';
 import logger from './logger.js';
@@ -12,10 +11,10 @@ import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/ge
 import sanitizeHtml from 'sanitize-html';
 
 // Initialize Google Gemini
-const genAI = new GoogleGenerativeAI('AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk');
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk');
+const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-// Sanitize-html configuration (reused from templates.js for consistency)
+// Sanitize-html configuration
 const sanitizeConfig = {
   allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'span', 'div', 'hr']),
   allowedAttributes: {
@@ -54,49 +53,8 @@ const slugify = (text) => {
     .replace(/-+$/, ''); // Trim - from end
 };
 
-// Expire Listings Job (unchanged)
-cron.schedule('0 0 * * *', async () => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const now = new Date();
-    const expiredListings = await listingModel
-      .find({ expiresAt: { $lte: now }, isActive: true })
-      .session(session);
-
-    for (const listing of expiredListings) {
-      listing.isActive = false;
-      await listing.save({ session });
-
-      await userModel.findByIdAndUpdate(
-        listing.seller.sellerId,
-        { $inc: { 'stats.activeListingsCount': -1 } },
-        { session }
-      );
-
-      await sendListingNotification(
-        listing.seller.sellerId.toString(),
-        'listing_expired',
-        `Your listing "${listing.productInfo.name}" has expired. Renew it to make it active again.`,
-        listing.productInfo.productId,
-        null,
-        session
-      );
-
-      logger.info(`Listing ${listing.productInfo.productId} marked as inactive due to expiration`);
-    }
-
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    logger.error(`Error in expireListings job: ${error.message}`, { stack: error.stack });
-  } finally {
-    session.endSession();
-  }
-});
-
 // Marketing Email Job
-cron.schedule('0 */5 * * *', async () => {
+export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -193,7 +151,7 @@ cron.schedule('0 */5 * * *', async () => {
         const result = await model.generateContent({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.8, // Slightly higher for creative wording
+            temperature: 0.8,
             maxOutputTokens: 150,
           },
           safetySettings: [
@@ -213,7 +171,7 @@ cron.schedule('0 */5 * * *', async () => {
         });
 
         enhancedDescription = result.response.text().trim();
-        enhancedDescription = sanitizeHtml(enhancedDescription, sanitizeConfig); // Sanitize for safety
+        enhancedDescription = sanitizeHtml(enhancedDescription, sanitizeConfig);
         logger.info(`Enhanced description for ${productInfo.name}: ${enhancedDescription}`);
       } catch (error) {
         logger.error(`Failed to enhance description for ${productInfo.name}: ${error.message}`);
@@ -228,7 +186,7 @@ cron.schedule('0 */5 * * *', async () => {
       });
     }
 
-    // Prepare Gemini prompt for dynamic email content (for user emails)
+    // Prepare Gemini prompt for dynamic email content
     const emailPrompt = `
       You are a marketing assistant for Beifity.com, an e-commerce platform in Kenya. Generate a catchy email subject line and a short introductory paragraph for a marketing email promoting ${listings.length} products. The tone should be engaging, friendly, and encourage users to explore the products.
 
@@ -296,7 +254,6 @@ cron.schedule('0 */5 * * *', async () => {
 
       const success = await sendEmail(user.personalInfo.email, subject, emailHtml);
       if (success) {
-        // Log the email
         await emailLogModel.create(
           {
             userId: user._id,
