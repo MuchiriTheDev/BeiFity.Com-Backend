@@ -54,18 +54,22 @@ const slugify = (text) => {
 };
 
 // Marketing Email Job
-export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
+export const marketingEmailJob = cron.schedule('0 */5 * * * ', async () => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     // Fetch users who opted into marketing emails
     const allUsers = await userModel
-      .find({ 'preferences.marketingEmails': true })
+      .find({
+        'preferences.marketingEmails': true,
+        'personalInfo.email': { $exists: true, $ne: null },
+        _id: { $exists: true }
+      })
       .select('personalInfo.email personalInfo.fullname _id')
       .session(session);
 
-    if (allUsers.length < 5) {
-      logger.warn(`Marketing email job: Only ${allUsers.length} users found with marketing emails enabled`);
+    if (allUsers.length === 0) {
+      logger.warn('Marketing email job: No valid users found with marketing emails enabled');
       await session.commitTransaction();
       return;
     }
@@ -79,30 +83,33 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
       .session(session);
 
     const recentUserIds = recentEmails.map(log => log.userId.toString());
-    const eligibleUsers = allUsers
+    let eligibleUsers = allUsers
       .filter(user => !recentUserIds.includes(user._id.toString()))
       .slice(0, 5); // Take up to 5 users
 
-    // If not enough eligible users, fill with least recently contacted
-    if (eligibleUsers.length < 5) {
-      const additionalUsers = await userModel
+    // If no eligible users, reset rotation by selecting least recently contacted
+    if (eligibleUsers.length === 0) {
+      logger.info('No eligible users found; resetting rotation to least recently contacted');
+      eligibleUsers = await userModel
         .find({
           'preferences.marketingEmails': true,
-          _id: { $nin: eligibleUsers.map(u => u._id) },
+          'personalInfo.email': { $exists: true, $ne: null },
+          _id: { $exists: true }
         })
         .sort({ 'analytics.lastActive': 1 }) // Prioritize least active
-        .limit(5 - eligibleUsers.length)
+        .limit(5)
         .select('personalInfo.email personalInfo.fullname _id')
         .session(session);
-
-      eligibleUsers.push(...additionalUsers);
     }
 
-    if (eligibleUsers.length < 5) {
-      logger.warn(`Marketing email job: Only ${eligibleUsers.length} eligible users found`);
+    if (eligibleUsers.length === 0) {
+      logger.warn('Marketing email job: No eligible users available after reset');
       await session.commitTransaction();
       return;
     }
+
+    // Log eligible users for debugging
+    logger.info(`Eligible users: ${eligibleUsers.map(u => u.personalInfo.email).join(', ')}`);
 
     // Fetch 3 random active, verified listings with inventory
     const listings = await listingModel
@@ -203,7 +210,7 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
         .join('\n')}
 
       **Instructions**:
-      - Subject: Max 60 characters, compelling and relevant.
+      - Subject: Max 60 characters, compelling and relevant, optionally personalized with {{fullname}}.
       - Intro: 1-2 sentences, max 100 characters, personalized with {{fullname}}.
       - Return a JSON object:
         {
@@ -213,7 +220,7 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
     `;
 
     let subject = 'Discover Amazing Deals on BeiFity.Com!';
-    let intro = `Hi {{fullname}}, check out these handpicked deals just for you on BeiFity.com!`;
+    let intro = `Hello {{fullname}}, Discover Top Picks!`;
 
     try {
       const result = await model.generateContent({
@@ -248,19 +255,33 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
     // Send emails to each user and track success
     const sentEmails = [];
     for (const user of eligibleUsers) {
-      const personalizedIntro = intro.replace(/{{fullname}}/g, user.personalInfo.fullname || 'Valued Customer');
-      const emailHtml = generateMarketingEmail(user.personalInfo.fullname || 'Valued Customer', products)
-        .replace(intro, personalizedIntro);
+      // Validate user data before sending
+      if (!user._id || !user.personalInfo.email) {
+        logger.error(`Invalid user data: ID=${user._id}, Email=${user.personalInfo.email}`);
+        continue;
+      }
 
-      const success = await sendEmail(user.personalInfo.email, subject, emailHtml);
+      const recipientName = user.personalInfo.fullname || 'Valued Customer';
+      logger.debug(`Recipient Name for ${user.personalInfo.email}: ${recipientName}`);
+      const sanitizedRecipientName = sanitizeHtml(recipientName, sanitizeConfig);
+      logger.debug(`Sanitized Recipient Name for ${user.personalInfo.email}: ${sanitizedRecipientName}`);
+      
+      // Personalize subject line
+      const personalizedSubject = subject.replace('{{fullname}}', sanitizedRecipientName);
+      logger.debug(`Personalized Subject for ${user.personalInfo.email}: ${personalizedSubject}`);
+      
+      const emailHtml = generateMarketingEmail(recipientName, products);
+      logger.debug(`Email HTML for ${user.personalInfo.email}: ${emailHtml.slice(0, 300)}...`);
+
+      const success = await sendEmail(user.personalInfo.email, personalizedSubject, emailHtml);
       if (success) {
         await emailLogModel.create(
-          {
+          [{
             userId: user._id,
             emailType: 'marketing',
             productIds: listings.map(l => l.productInfo.productId),
             sentAt: new Date(),
-          },
+          }],
           { session }
         );
         sentEmails.push(user.personalInfo.email);
@@ -270,9 +291,9 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
       }
     }
 
-    // Send admin notification if all 5 emails were sent successfully
-    if (sentEmails.length === 5) {
-      const adminEmail = process.env.ADMIN_EMAIL || 'support@beifity.com';
+    // Send admin notification if at least 1 email was sent successfully
+    if (sentEmails.length > 0) {
+      const adminEmail = process.env.ADMIN_EMAIL || 'beifitycom@gmail.com';
       const adminEmailHtml = generateMarketingAdminReportEmail(products, sentEmails);
       const adminSuccess = await sendEmail(adminEmail, 'Marketing Campaign Report - BeiFity.Com', adminEmailHtml);
       if (adminSuccess) {
@@ -281,7 +302,7 @@ export const marketingEmailJob = cron.schedule('0 */5 * * *', async () => {
         logger.error(`Failed to send admin marketing report email to ${adminEmail}`);
       }
     } else {
-      logger.warn(`Admin email not sent: Only ${sentEmails.length} of 5 user emails were sent successfully`);
+      logger.warn('Admin email not sent: No user emails were sent successfully');
     }
 
     await session.commitTransaction();
