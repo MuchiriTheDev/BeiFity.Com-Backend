@@ -1,4 +1,4 @@
-import axios from 'axios';
+
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/sendEmail.js';
@@ -13,6 +13,7 @@ import {
   generatePayoutNotificationEmail,
   generateTransactionReversalEmail,
 } from '../utils/Templates.js';
+import axios from 'axios';
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
 const commissionRate = 0.05; // 5% platform commission
