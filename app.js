@@ -28,8 +28,6 @@ import './utils/expireListings.js'
 import transactionRouter from './routes/transactionRoutes.js';
 import paystackRouter from './routes/paystackRoutes.js';
 import financialRouter from './routes/financialRoutes.js';
-import { restoreAllListings } from './utils/restoreListings.js';
-import { marketingEmailJob } from './utils/expireListings.js';
 
 const app = express();
 const cache = new NodeCache({ stdTTL: 3600 });
@@ -76,7 +74,6 @@ app.use((req, res, next) => {
 
 // Configurations
 connectDB();
-restoreAllListings()
 configureCloudinary();
 configureWebpush();
 
