@@ -9,6 +9,8 @@ import { notificationModel } from '../models/Notifications.js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import { sendEmail } from '../utils/sendEmail.js';
 import env from '../config/env.js';
+import { v2 as cloudinary } from 'cloudinary';
+import { orderModel } from '../models/Order.js';
 
 // Helper to send notification
 export const sendListingNotification = async (
@@ -1192,38 +1194,270 @@ export const updateListing = async (req, res) => {
   }
 };
 
-// Delete Listing
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Utility function to extract public ID from Cloudinary URL
+const extractPublicIdFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/');
+    
+    // Find the index of 'upload' in the path
+    const uploadIndex = pathParts.indexOf('upload');
+    if (uploadIndex === -1) return null;
+    
+    // Get the part after the version (if exists) and before the file extension
+    const publicIdWithVersion = pathParts.slice(uploadIndex + 1).join('/');
+    const publicId = publicIdWithVersion.replace(/^v\d+\//, '');
+    
+    // Remove file extension
+    return publicId.replace(/\.[^/.]+$/, '');
+  } catch (error) {
+    console.error('Error extracting public ID from URL:', url, error);
+    return null;
+  }
+};
+
+// Delete Listing Endpoint
 export const deleteListing = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     if (!req.user) {
       logger.warn('Delete listing failed: No user data in request');
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
+
+    const { productId } = req.params;
+    const userId = req.user._id.toString();
+
+    // Find the listing with session for transaction consistency
+    const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
+    
+    if (!listing) {
+      logger.warn(`Delete listing failed: Listing ${productId} not found`);
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+
+    // Check authorization - user must be the seller
+    if (listing.seller.sellerId.toString() !== userId) {
+      logger.warn(`Delete listing failed: User ${userId} not authorized`, { productId });
+      await session.abortTransaction();
+      return res.status(403).json({ success: false, message: 'Unauthorized to delete this listing' });
+    }
+
+    // Delete images from Cloudinary
+    if (listing.productInfo.images && listing.productInfo.images.length > 0) {
+      try {
+        const publicIds = listing.productInfo.images
+          .map(extractPublicIdFromUrl)
+          .filter(id => id !== null);
+
+        if (publicIds.length > 0) {
+          // Delete images in batches if there are many
+          const batchSize = 10;
+          for (let i = 0; i < publicIds.length; i += batchSize) {
+            const batch = publicIds.slice(i, i + batchSize);
+            await cloudinary.api.delete_resources(batch);
+          }
+          logger.info(`Deleted ${publicIds.length} images from Cloudinary for listing ${productId}`);
+        }
+      } catch (cloudinaryError) {
+        logger.error(`Error deleting images from Cloudinary: ${cloudinaryError.message}`, {
+          productId,
+          userId
+        });
+        // Continue with database cleanup even if Cloudinary deletion fails
+      }
+    }
+
+    // Update user model - remove listing reference and update stats
+    await userModel.findByIdAndUpdate(
+      listing.seller.sellerId, 
+      {
+        $pull: { listings: listing._id },
+        $inc: { 
+          'stats.activeListingsCount': listing.isSold || !listing.isActive ? 0 : -1,
+          'stats.soldListingsCount': listing.isSold ? -1 : 0
+        },
+      },
+      { session }
+    );
+
+    // Remove listing from all users' wishlists
+    await userModel.updateMany(
+      { wishlist: listing._id },
+      { $pull: { wishlist: listing._id } },
+      { session }
+    );
+
+    // Remove listing from all users' carts
+    await userModel.updateMany(
+      { 'cart.items.listingId': listing._id },
+      { $pull: { 'cart.items': { listingId: listing._id } } },
+      { session }
+    );
+
+    // Update any orders that contain this listing's product
+    await orderModel.updateMany(
+      { 'items.productId': productId },
+      { 
+        $set: { 
+          'items.$[elem].cancelled': true,
+          'items.$[elem].status': 'cancelled'
+        }
+      },
+      {
+        arrayFilters: [{ 'elem.productId': productId }],
+        session
+      }
+    );
+
+
+    // Delete the listing itself
+    await listingModel.deleteOne({ 'productInfo.productId': productId }).session(session);
+
+    // Commit the transaction
+    await session.commitTransaction();
+    
+    logger.info(`Listing deleted successfully: ${productId} by user ${userId}`, {
+      deletedImages: listing.productInfo.images.length,
+      listingId: listing._id
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Listing deleted successfully',
+      data: {
+        productId,
+        deletedImages: listing.productInfo.images.length,
+        relatedConversationsDeleted: conversationIds.length
+      }
+    });
+    
+  } catch (error) {
+    // Abort transaction on error
+    console.log('Aborting transaction due to error:', error);
+    await session.abortTransaction();
+    
+    logger.error(`Error deleting listing: ${error.message}`, { 
+      stack: error.stack, 
+      userId: req.user?._id 
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete listing',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Alternative simplified version without transaction (if you prefer)
+export const deleteListingSimple = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Delete listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId });
+    
     if (!listing) {
       logger.warn(`Delete listing failed: Listing ${productId} not found`);
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
+
     if (listing.seller.sellerId.toString() !== userId) {
       logger.warn(`Delete listing failed: User ${userId} not authorized`, { productId });
       return res.status(403).json({ success: false, message: 'Unauthorized to delete this listing' });
     }
 
+    // Delete images from Cloudinary
+    if (listing.productInfo.images && listing.productInfo.images.length > 0) {
+      try {
+        const publicIds = listing.productInfo.images
+          .map(extractPublicIdFromUrl)
+          .filter(id => id !== null);
+
+        if (publicIds.length > 0) {
+          await cloudinary.api.delete_resources(publicIds);
+          logger.info(`Deleted ${publicIds.length} images from Cloudinary for listing ${productId}`);
+        }
+      } catch (cloudinaryError) {
+        logger.error(`Error deleting images from Cloudinary: ${cloudinaryError.message}`, {
+          productId,
+          userId
+        });
+        // Continue with database cleanup
+      }
+    }
+
+    // Update user model
     await userModel.findByIdAndUpdate(listing.seller.sellerId, {
       $pull: { listings: listing._id },
-      $inc: { 'stats.activeListingsCount': listing.isSold ? 0 : -1 },
+      $inc: { 
+        'stats.activeListingsCount': listing.isSold || !listing.isActive ? 0 : -1,
+        'stats.soldListingsCount': listing.isSold ? -1 : 0
+      },
     });
 
+    // Clean up related data (non-critical, can run in background)
+    Promise.all([
+      userModel.updateMany(
+        { wishlist: listing._id },
+        { $pull: { wishlist: listing._id } }
+      ),
+      userModel.updateMany(
+        { 'cart.items.listingId': listing._id },
+        { $pull: { 'cart.items': { listingId: listing._id } } }
+      ),
+      orderModel.updateMany(
+        { 'items.productId': productId },
+        { 
+          $set: { 
+            'items.$[elem].cancelled': true,
+            'items.$[elem].status': 'cancelled'
+          }
+        },
+        { arrayFilters: [{ 'elem.productId': productId }] }
+      )
+    ]).catch(cleanupError => {
+      logger.error('Error during cleanup operations:', cleanupError);
+    });
+
+    // Delete the listing
     await listingModel.deleteOne({ 'productInfo.productId': productId });
 
     logger.info(`Listing deleted: ${productId} by user ${userId}`);
-    res.status(200).json({ success: true, message: 'Listing deleted successfully' });
+    res.status(200).json({ 
+      success: true, 
+      message: 'Listing deleted successfully',
+      data: { productId }
+    });
+    
   } catch (error) {
-    logger.error(`Error deleting listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
-    res.status(500).json({ success: false, message: 'Failed to delete listing' });
+    logger.error(`Error deleting listing: ${error.message}`, { 
+      stack: error.stack, 
+      productId, 
+      userId: req.user?._id 
+    });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete listing' 
+    });
   }
 };
 

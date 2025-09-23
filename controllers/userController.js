@@ -4,6 +4,12 @@ import { listingModel } from '../models/Listing.js'; // Assuming Listing model e
 import bcrypt from 'bcryptjs';
 import logger from '../utils/logger.js';
 import env from '../config/env.js';
+import { Conversation, Message } from '../models/Message.js';
+import { notificationModel } from '../models/Notifications.js';
+import { ReportModel } from '../models/Report.js';
+import { orderModel } from '../models/Order.js';
+import { TransactionModel } from '../models/Transaction.js';
+import mongoose from 'mongoose';
 
 /**
  * Update Profile Views
@@ -592,3 +598,110 @@ export const getOnlySellers = async (req, res) =>{
     return res.status(500).json({ success: false, message : 'failed to fetch sellers'})
   }
 }
+
+export const deleteAccount = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!req.user) {
+      await session.abortTransaction();
+      session.endSession();
+      logger.warn('Account deletion failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Please log in to delete your account' });
+    }
+
+    const userId = req.user._id;
+
+    const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      logger.warn(`Account deletion failed: User ${userId} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Prevent deletion if there are active listings or pending orders (as buyer or seller)
+    const activeListings = await listingModel.countDocuments({ 'seller.sellerId': userId, isActive: true }).session(session);
+    if (activeListings > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ success: false, message: 'Cannot delete account with active listings' });
+    }
+
+    // const pendingBuyerOrders = await orderModel.countDocuments({ customerId: userId, status: { $nin: ['delivered', 'cancelled'] } }).session(session);
+    // if (pendingBuyerOrders > 0) {
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as buyer' });
+    // }
+
+    // const pendingSellerItems = await orderModel.countDocuments({
+    //   'items.sellerId': userId,
+    //   'items.status': { $nin: ['delivered', 'cancelled'] }
+    // }).session(session);
+    // if (pendingSellerItems > 0) {
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as seller' });
+    // }
+
+    // Delete user's listings (even inactive ones for cleanup)
+    await listingModel.deleteMany({ 'seller.sellerId': userId }).session(session);
+
+    // Remove user's reviews from all listings and update ratings
+    await listingModel.updateMany(
+      { 'reviews.user': userId },
+      { $pull: { reviews: { user: userId } } },
+      { session }
+    );
+
+    // Handle conversations: remove user from participants, delete their messages, and clean up empty conversations
+    await Conversation.updateMany(
+      { participants: userId },
+      { $pull: { participants: userId } },
+      { session }
+    );
+    await Message.deleteMany({ sender: userId }).session(session);
+    await Conversation.deleteMany({ participants: { $size: 0 } }).session(session);
+
+    // Delete notifications to/from the user
+    await notificationModel.deleteMany({ $or: [{ userId: userId }, { sender: userId }] }).session(session);
+
+    // Delete reports submitted by the user or against the user (for user-type reports)
+    await ReportModel.deleteMany({ reporterId: userId }).session(session);
+    await ReportModel.deleteMany({ reportType: 'user', reportedEntityId: userId }).session(session);
+
+    // Anonymize orders where user is customer (set customerId to null)
+    await orderModel.updateMany({ customerId: userId }, { customerId: null }, { session });
+
+    // Anonymize order items where user is seller (set sellerId to null)
+    await orderModel.updateMany(
+      {},
+      { $set: { 'items.$[item].sellerId': null } },
+      { arrayFilters: [{ 'item.sellerId': userId }], session }
+    );
+
+    // Anonymize transaction items where user is seller (set sellerId to null)
+    await TransactionModel.updateMany(
+      {},
+      { $set: { 'items.$[item].sellerId': null } },
+      { arrayFilters: [{ 'item.sellerId': userId }], session }
+    );
+
+    // Finally, delete the user
+    await userModel.findByIdAndDelete(userId).session(session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    logger.info(`Account deleted for user ${userId}`);
+    return res.status(200).json({ success: true, message: 'Account deleted successfully' });
+  } catch (error) {
+    console.log(error);
+    await session.abortTransaction();
+    session.endSession();
+    logger.error(`Error deleting account: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    return res.status(500).json({ success: false, message: 'Failed to delete account' });
+  }
+};

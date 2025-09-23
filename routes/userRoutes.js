@@ -13,6 +13,7 @@ import {
   addSellerReview,
   getOnlySellers,
   removeSellerReview,
+  deleteAccount,
 } from '../controllers/userController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -34,5 +35,6 @@ userRouter.post('/wishlist/:listingId', authUser, addToWishlist); // Add to wish
 userRouter.delete('/wishlist/:listingId', authUser, removeFromWishlist); // Remove from wishlist
 userRouter.post('/link/referral', authUser, getReferralLink); // Get referral link
 userRouter.post('/seller-review/:sellerId/:reviewId', authUser, removeSellerReview); // Remove seller review
+userRouter.delete('/delete-account', authUser, deleteAccount); // Delete user account
 
 export default userRouter;
