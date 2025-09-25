@@ -1066,7 +1066,7 @@ export const getListings = async (req, res) => {
     // { verified: 'Verified',  isActive: true }
     const listings = await listingModel
       .find()
-      .select('-aiFindings -promoteUntil -inventory -shipingOptions -expiresAt -AgreedToTerms -analytics -createdAt -updatedAt -__v')
+      .select('-aiFindings -promoteUntil -inventory -shipingOptions -expiresAt -AgreedToTerms -updatedAt -__v')
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
     
