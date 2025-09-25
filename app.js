@@ -24,7 +24,7 @@ import cloudinaryRouter from './routes/cloudinaryRoutes.js';
 import logger from './utils/logger.js';
 import { initializeSocket } from './utils/socket.js';
 import env from './config/env.js';
-import './utils/expireListings.js'
+import './utils/emailMarketing.js'
 import transactionRouter from './routes/transactionRoutes.js';
 import paystackRouter from './routes/paystackRoutes.js';
 import financialRouter from './routes/financialRoutes.js';

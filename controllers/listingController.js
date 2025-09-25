@@ -364,9 +364,13 @@ export const markAsSold = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
 
-    if (listing.seller.sellerId.toString() !== userId) {
-      logger.warn(`Mark as sold failed: User ${userId} not authorized`, { productId });
-      return res.status(403).json({ success: false, message: 'Unauthorized to mark this listing as sold' });
+    const user = await userModel.findById(userId).session(session);
+
+    if (listing.seller.sellerId.toString() !== userId ) {
+      if(!user.personalInfo.isAdmin) {
+        logger.warn(`Mark as sold failed: User ${userId} not authorized`, { productId });
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
     }
 
     if (listing.isSold) {
@@ -843,9 +847,13 @@ export const markAsUnSold = async (req, res) => {
       logger.warn(`Mark as unsold failed: Listing ${productId} not found`);
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
-    if (listing.seller.sellerId.toString() !== userId) {
-      logger.warn(`Mark as unsold failed: User ${userId} not authorized`, { productId });
-      return res.status(403).json({ success: false, message: 'Unauthorized' });
+
+    const user = await userModel.findById(userId).session(session);
+    if (listing.seller.sellerId.toString() !== userId ) {
+      if(!user.personalInfo.isAdmin) {
+        logger.warn(`Mark as unsold failed: User ${userId} not authorized`, { productId });
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
     }
     if (!listing.isSold) {
       logger.warn(`Mark as unsold failed: Listing ${productId} already unsold`);
@@ -1246,11 +1254,20 @@ export const deleteListing = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
 
-    // Check authorization - user must be the seller
-    if (listing.seller.sellerId.toString() !== userId) {
-      logger.warn(`Delete listing failed: User ${userId} not authorized`, { productId });
+    const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      logger.warn(`Delete listing failed: User ${userId} not found`);
       await session.abortTransaction();
-      return res.status(403).json({ success: false, message: 'Unauthorized to delete this listing' });
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Check authorization - user must be the seller
+    if (listing.seller.sellerId.toString() !== userId) { 
+      if(!user.personalInfo.isAdmin) {
+        logger.warn(`Delete listing failed: User ${userId} not authorized`, { productId });
+        await session.abortTransaction();
+        return res.status(403).json({ success: false, message: 'Unauthorized to delete this listing' });
+      }
     }
 
     // Delete images from Cloudinary
@@ -1338,7 +1355,6 @@ export const deleteListing = async (req, res) => {
       data: {
         productId,
         deletedImages: listing.productInfo.images.length,
-        relatedConversationsDeleted: conversationIds.length
       }
     });
     

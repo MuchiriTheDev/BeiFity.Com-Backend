@@ -430,6 +430,7 @@ export const login = async (req, res) => {
       message: 'Login successful',
       token,
       userId: user._id,
+      isAdmin: user.personalInfo.isAdmin,
     });
   } catch (error) {
     logger.error(`Login error: ${error.message}`, { stack: error.stack });
