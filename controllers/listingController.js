@@ -861,6 +861,9 @@ export const markAsUnSold = async (req, res) => {
     }
 
     listing.isSold = false;
+    if(listing.inventory === 0) {
+      listing.inventory += 2 
+    }
     await listing.save({ session });
 
     await userModel.findByIdAndUpdate(
