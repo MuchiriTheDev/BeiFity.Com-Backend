@@ -124,7 +124,7 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI("AIzaSyBlFGT7JBMIAnA5QxPPhd3dcQ_MmrMhDLk");
+    const genAI = new GoogleGenerativeAI("AIzaSyBWq3sDh4cvy9Wupo2ASBPhrCCk41WGlpM");
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Prepare prompt for AI verification and findings
