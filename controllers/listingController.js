@@ -1128,9 +1128,12 @@ export const updateListing = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
 
+    const user = await userModel.findById(userId).session(session);
     if (listing.seller.sellerId.toString() !== userId) {
-      logger.warn(`Update listing failed: User ${userId} not authorized`, { productId });
-      return res.status(403).json({ success: false, message: 'Unauthorized to update this listing' });
+      if(!user.personalInfo.isAdmin) {
+        logger.warn(`Update listing failed: User ${userId} not authorized`, { productId }); 
+        return res.status(403).json({ success: false, message: 'Unauthorized to update listing' });
+      }
     }
 
     const updateData = {};
