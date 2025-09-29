@@ -137,7 +137,7 @@ export const generateOrderEmailSeller = (sellerName, buyerName, items, orderTime
   `;
 };
 
-// HTML Email Template Function for Buyer (unchanged)
+// HTML Email Template Function for Buyer (updated for no payment URL)
 export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice, deliveryAddress, orderId, sellerIds, paymentUrl) => {
   const sanitizedBuyerName = sanitizeHtml(buyerName, sanitizeConfig);
   const sanitizedOrderTime = sanitizeHtml(orderTime, sanitizeConfig);
@@ -145,7 +145,6 @@ export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice,
   const sanitizedNearestTown = sanitizeHtml(deliveryAddress.nearestTown || '', sanitizeConfig);
   const sanitizedCountry = sanitizeHtml(deliveryAddress.country || 'Kenya', sanitizeConfig);
   const sanitizedOrderId = sanitizeHtml(orderId, sanitizeConfig);
-  const sanitizedPaymentUrl = sanitizeHtml(paymentUrl, { ...sanitizeConfig, allowedSchemes: ['https'] });
 
   const itemDetails = items.map(item => `
     <p style="font-size: 13px; color: #475569; margin: 0 0 8px;">
@@ -197,7 +196,7 @@ export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice,
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                    Hi ${sanitizedBuyerName}, we’re thrilled to confirm your order on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Please complete the payment to proceed.
+                    Hi ${sanitizedBuyerName}, we’re thrilled to confirm your order on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Check your phone for the M-Pesa STK Push prompt to complete payment.
                   </p>
                 </td>
               </tr>
@@ -215,13 +214,8 @@ export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice,
               </tr>
               <tr>
                 <td>
-                  <a href="${sanitizedPaymentUrl}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">Complete Payment</a>
-                </td>
-              </tr>
-              <tr>
-                <td>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
-                    <strong>Next Steps:</strong> Click the button above to complete your payment. Once confirmed, the seller(s) will contact you via chat to arrange shipping. Please verify the product before finalizing delivery.
+                    <strong>Next Steps:</strong> Enter your M-Pesa PIN on your phone to confirm payment. Once processed, the seller(s) will contact you via chat to arrange shipping. Please verify the product before finalizing delivery.
                   </p>
                   <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
                     <strong>Need Help?</strong> Check your buyer dashboard or contact our support team.
@@ -294,7 +288,7 @@ export const generateOrderEmailAdmin = (buyerName, items, orderTime, totalPrice,
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
-                    A new order has been placed on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. The buyer is completing payment. Funds will be held until delivery confirmation.
+                    A new order has been placed on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. The buyer is completing payment via M-Pesa. Funds will be held until delivery confirmation.
                   </p>
                 </td>
               </tr>
@@ -340,7 +334,7 @@ export const generateOrderEmailAdmin = (buyerName, items, orderTime, totalPrice,
   `;
 };
 
-// HTML Email Template Function for Order Status Update (unchanged)
+// HTML Email Template Function for Order Status Update (updated for M-Pesa)
 export const generateOrderStatusEmail = (recipientName, itemName, orderId, status, chatUserId) => {
   const sanitizedRecipientName = sanitizeHtml(recipientName, sanitizeConfig);
   const sanitizedItemName = sanitizeHtml(itemName, sanitizeConfig);
@@ -417,7 +411,7 @@ export const generateOrderStatusEmail = (recipientName, itemName, orderId, statu
   `;
 };
 
-// HTML Email Template Function for Order Cancellation (unchanged)
+// HTML Email Template Function for Order Cancellation (updated for manual refund)
 export const generateOrderCancellationEmail = (recipientName, itemName, orderId, cancelledBy, refundMessage, chatUserId) => {
   const sanitizedRecipientName = sanitizeHtml(recipientName, sanitizeConfig);
   const sanitizedItemName = sanitizeHtml(itemName, sanitizeConfig);
@@ -491,7 +485,7 @@ export const generateOrderCancellationEmail = (recipientName, itemName, orderId,
   `;
 };
 
-// New HTML Email Template Function for Refund Notification (Buyer and Seller)
+// New HTML Email Template Function for Refund Notification (Buyer and Seller) (updated for manual)
 export const generateRefundEmail = (recipientName, itemName, orderId, refundAmount, isFullRefund, recipientRole, chatUserId) => {
   const sanitizedRecipientName = sanitizeHtml(recipientName, sanitizeConfig);
   const sanitizedItemName = sanitizeHtml(itemName, sanitizeConfig);
@@ -503,8 +497,8 @@ export const generateRefundEmail = (recipientName, itemName, orderId, refundAmou
   const isBuyer = sanitizedRecipientRole.toLowerCase() === 'buyer';
   const title = isBuyer ? 'Refund Initiated' : 'Order Item Refund Notification';
   const message = isBuyer
-    ? `A ${isFullRefund ? 'full' : 'partial'} refund of <strong>KES ${sanitizedRefundAmount}</strong> for the item "<strong>${sanitizedItemName}</strong>" (Order ID: ${sanitizedOrderId}) has been initiated and will be processed to your original payment method within 5-10 business days.`
-    : `The item "<strong>${sanitizedItemName}</strong>" (Order ID: ${sanitizedOrderId}) has been cancelled by the buyer. An amount of <strong>KES ${sanitizedRefundAmount}</strong> has been deducted from your pending balance as part of the ${isFullRefund ? 'full' : 'partial'} refund process.`;
+    ? `A ${isFullRefund ? 'full' : 'partial'} refund of <strong>KES ${sanitizedRefundAmount}</strong> for the item "<strong>${sanitizedItemName}</strong>" (Order ID: ${sanitizedOrderId}) has been initiated manually and will be processed to your M-Pesa account as soon as possible.`
+    : `The item "<strong>${sanitizedItemName}</strong>" (Order ID: ${sanitizedOrderId}) has been cancelled by the buyer. An amount of <strong>KES ${sanitizedRefundAmount}</strong> has been deducted from your pending balance as part of the ${isFullRefund ? 'full' : 'partial'} manual refund process.`;
 
   return `
     <!DOCTYPE html>
@@ -572,12 +566,12 @@ export const generateRefundEmail = (recipientName, itemName, orderId, refundAmou
   `;
 };
 
-// HTML Email Template Function for Payout Notification (Seller)
-export const generatePayoutNotificationEmail = (sellerName, orderId, payoutAmount, itemIds, paystackTransferCode) => {
+// HTML Email Template Function for Payout Notification (Seller) (updated for manual)
+export const generatePayoutNotificationEmail = (sellerName, orderId, payoutAmount, itemIds, swiftTransferId) => {
   const sanitizedSellerName = sanitizeHtml(sellerName, sanitizeConfig);
   const sanitizedOrderId = sanitizeHtml(orderId, sanitizeConfig);
   const sanitizedPayoutAmount = sanitizeHtml(payoutAmount.toFixed(2), sanitizeConfig);
-  const sanitizedPaystackTransferCode = sanitizeHtml(paystackTransferCode || 'N/A', sanitizeConfig);
+  const sanitizedSwiftTransferId = sanitizeHtml(swiftTransferId || 'N/A', sanitizeConfig);
   const sanitizedItemIds = itemIds.map(id => sanitizeHtml(id, sanitizeConfig)).join(', ');
 
   return `
@@ -586,7 +580,7 @@ export const generatePayoutNotificationEmail = (sellerName, orderId, payoutAmoun
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Payout Initiated - BeiFity.Com</title>
+      <title>Payout Processed - BeiFity.Com</title>
     </head>
     <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
@@ -600,20 +594,20 @@ export const generatePayoutNotificationEmail = (sellerName, orderId, payoutAmoun
               </tr>
               <tr>
                 <td>
-                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Payout Initiated, ${sanitizedSellerName}!</h2>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Payout Processed, ${sanitizedSellerName}!</h2>
                 </td>
               </tr>
               <tr>
                 <td>
-                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Payout Has Been Initiated</p>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Payout Has Been Processed</p>
                 </td>
               </tr>
               <tr>
                 <td>
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
                     Hi ${sanitizedSellerName},<br>
-                    A payout of <strong>KES ${sanitizedPayoutAmount}</strong> for items (Item IDs: ${sanitizedItemIds}) in Order ID: ${sanitizedOrderId} has been initiated to your M-Pesa account. The funds should reflect within 1-3 business days.<br>
-                    Transaction Reference: <strong>${sanitizedPaystackTransferCode}</strong>
+                    A manual payout of <strong>KES ${sanitizedPayoutAmount}</strong> for items (Item IDs: ${sanitizedItemIds}) in Order ID: ${sanitizedOrderId} has been processed to your M-Pesa account.<br>
+                    Transaction Reference: <strong>${sanitizedSwiftTransferId}</strong>
                   </p>
                 </td>
               </tr>
@@ -646,7 +640,7 @@ export const generatePayoutNotificationEmail = (sellerName, orderId, payoutAmoun
   `;
 };
 
-// HTML Email Template Function for Transaction Reversal Notification (Buyer and Seller)
+// HTML Email Template Function for Transaction Reversal Notification (Buyer and Seller) (updated for manual)
 export const generateTransactionReversalEmail = (recipientName, orderId, itemIds, recipientRole, chatUserId) => {
   const sanitizedRecipientName = sanitizeHtml(recipientName, sanitizeConfig);
   const sanitizedOrderId = sanitizeHtml(orderId, sanitizeConfig);
@@ -657,7 +651,7 @@ export const generateTransactionReversalEmail = (recipientName, orderId, itemIds
   const isBuyer = sanitizedRecipientRole.toLowerCase() === 'buyer';
   const title = isBuyer ? 'Transaction Reversed - Full Refund' : 'Transaction Reversed Notification';
   const message = isBuyer
-    ? `The transaction for Order ID: ${sanitizedOrderId} (Items: ${sanitizedItemIds}) has been reversed. A full refund has been processed to your original payment method and should reflect within 5-10 business days.`
+    ? `The transaction for Order ID: ${sanitizedOrderId} (Items: ${sanitizedItemIds}) has been reversed. A full manual refund has been processed and will be sent to your M-Pesa account as soon as possible.`
     : `The transaction for Order ID: ${sanitizedOrderId} (Items: ${sanitizedItemIds}) has been reversed. The corresponding amounts have been deducted from your pending balance.`;
 
   return `
@@ -801,7 +795,7 @@ export const generateOrderStatusEmailAdmin = (adminName, itemName, orderId, stat
   `;
 };
 
-// HTML Email Template Function for Admin Order Cancellation Notification
+// HTML Email Template Function for Admin Order Cancellation Notification (updated for manual refund)
 export const generateOrderCancellationEmailAdmin = (adminName, itemName, orderId, cancelledBy, refundMessage, userId) => {
   const sanitizedAdminName = sanitizeHtml(adminName, sanitizeConfig);
   const sanitizedItemName = sanitizeHtml(itemName, sanitizeConfig);

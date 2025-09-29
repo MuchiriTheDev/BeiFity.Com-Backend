@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
 import { getOnlineUsers } from './socketController.js';
+import { sendNotification } from './notificationController.js';
 
 // Helper function to format participant details
 const formatParticipant = (participant, onlineUsers) => ({

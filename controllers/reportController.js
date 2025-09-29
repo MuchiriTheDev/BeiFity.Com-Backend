@@ -7,8 +7,9 @@ import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { ReportModel } from '../models/Report.js';
 import { orderModel } from '../models/Order.js';
+import { sendNotification } from './notificationController.js';
 
-// Loaditeral: Load environment variables
+// Load environment variables
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
 
 // Email Template for User Report Confirmation
@@ -389,14 +390,13 @@ export const createReport = async (req, res) => {
 
     // Create user notification (if not anonymous)
     if (reporterId) {
-      const notification = new notificationModel({
-        userId: reporterId,
-        sender: reporterId,
-        type: 'report',
-        content: `Your ${reportType}${reportedItem ? ` item (${reportedItem.name})` : ''} report (ID: ${savedReport._id}) has been submitted and is under review.`,
-      });
-      await notification.save();
-      logger.info(`Notification created for user ${reporterId}`, { reportId: savedReport._id });
+      const notificationContent = `Your ${reportType}${reportedItem ? ` item (${reportedItem.name})` : ''} report (ID: ${savedReport._id}) has been submitted and is under review.`;
+      try {
+        await sendNotification(reporterId, 'report', notificationContent, reporterId);
+        logger.info(`Notification created for user ${reporterId}`, { reportId: savedReport._id });
+      } catch (notificationError) {
+        logger.warn(`Failed to create notification for user ${reporterId}: ${notificationError.message}`, { reportId: savedReport._id });
+      }
     }
 
     // Send admin alert email
@@ -666,14 +666,13 @@ export const updateReportStatus = async (req, res) => {
         }
 
         // Create user notification
-        const notification = new notificationModel({
-          userId: report.reporterId,
-          sender: req.user._id,
-          type: 'report_status',
-          content: `Your ${report.reportType} report (ID: ${id}) status has been updated to ${status}.`,
-        });
-        await notification.save();
-        logger.info(`Notification created for user ${report.reporterId}`, { reportId: id });
+        const notificationContent = `Your ${report.reportType} report (ID: ${id}) status has been updated to ${status}.`;
+        try {
+          await sendNotification(report.reporterId.toString(), 'report_status', notificationContent, req.user._id.toString(), session);
+          logger.info(`Notification created for user ${report.reporterId}`, { reportId: id });
+        } catch (notificationError) {
+          logger.warn(`Failed to create notification for user ${report.reporterId}: ${notificationError.message}`, { reportId: id });
+        }
       }
     }
 

@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { userModel } from '../models/User.js';
 import sanitizeHtml from 'sanitize-html';
 import logger from '../utils/logger.js';
-import { sendListingNotification } from './listingController.js';
+import { sendNotification } from './notificationController.js';
 
 // Constants
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -88,12 +88,11 @@ export const uploadImages = async (req, res) => {
     }
 
     // Notify user
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'image_uploaded',
       `You successfully uploaded ${uploadedImages.length} image(s) to your account.`,
       null,
-      userId,
       session
     );
 
@@ -154,12 +153,11 @@ export const deleteImage = async (req, res) => {
     }
 
     // Notify user
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'image_deleted',
       `You successfully deleted an image from your account.`,
       null,
-      userId,
       session
     );
 

@@ -11,37 +11,7 @@ import { sendEmail } from '../utils/sendEmail.js';
 import env from '../config/env.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { orderModel } from '../models/Order.js';
-
-// Helper to send notification
-export const sendListingNotification = async (
-  userId,
-  type,
-  content,
-  productId,
-  senderId = null,
-  session = null
-) => {
-  try {
-    const user = await userModel.findById(userId).session(session);
-    if (!user) {
-      logger.warn(`Send notification failed: User ${userId} not found`, { type, productId });
-      return false;
-    }
-
-    const notification = new notificationModel({
-      userId,
-      type,
-      content: sanitizeHtml(content),
-      sender: senderId,
-    });
-    await notification.save({ session });
-
-    return true;
-  } catch (error) {
-    logger.error(`Error sending notification: ${error.message}`, { stack: error.stack, userId, type, productId });
-    return false;
-  }
-};
+import { sendNotification } from './notificationController.js';
 
 // Add Listing
 export const addListing = async (req, res) => {
@@ -240,7 +210,7 @@ export const addListing = async (req, res) => {
     const findingsSummary = aiResponse.findings
       .map((finding) => `- ${finding.title} (${finding.priority}): ${finding.description} [Action: ${finding.action}]`)
       .join('\n');
-    await sendListingNotification(
+    await sendNotification(
       userId,
       aiResponse.verified === 'Verified' ? 'listing_verified' : 'listing_rejected',
       `Your listing "${listingData.productInfo.name}" has been ${aiResponse.verified.toLowerCase()}. ${
@@ -248,7 +218,6 @@ export const addListing = async (req, res) => {
           ? 'It is now live!'
           : 'Please review the following findings and update your listing:\n' + findingsSummary
       }`,
-      productId,
       null,
       session
     );
@@ -257,11 +226,10 @@ export const addListing = async (req, res) => {
     if (aiResponse.verified === 'Rejected') {
       const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
       for (const admin of admins) {
-        await sendListingNotification(
+        await sendNotification(
           admin._id,
           'admin_pending_listing',
           `Listing "${listingData.productInfo.name}" by user ${req.user.personalInfo.fullname} was rejected by AI. Findings:\n${findingsSummary}`,
-          productId,
           req.user._id,
           session
         );
@@ -320,11 +288,10 @@ export const renewListing = async (req, res) => {
       { session }
     );
 
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'listing_renewed',
       `Your listing "${listing.productInfo.name}" has been renewed and is now active for another 30 days.`,
-      productId,
       null,
       session
     );
@@ -403,11 +370,10 @@ export const markAsSold = async (req, res) => {
     );
 
     // Notify seller
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'listing_sold',
       `Congratulations! Your listing "${listing.productInfo.name}" has been marked as sold.`,
-      productId,
       null,
       session
     );
@@ -482,11 +448,10 @@ export const addReview = async (req, res) => {
     const reviewer = await userModel.findById(userId).session(session);
 
     // Notify seller
-    await sendListingNotification(
+    await sendNotification(
       listing.seller.sellerId,
       'listing_review',
       `A new review (${rating}/5) was added to your listing "${listing.productInfo.name}" by ${reviewer.personalInfo.fullname}.`,
-      productId,
       userId,
       session
     );
@@ -530,11 +495,10 @@ export const recordInquiry = async (req, res) => {
     await listing.save({ session });
 
     // Notify seller
-    await sendListingNotification(
+    await sendNotification(
       listing.seller.sellerId,
       'listing_inquiry',
       `A new inquiry was made on your listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
-      productId,
       userId,
       session
     );
@@ -788,11 +752,10 @@ export const updateInventory = async (req, res) => {
         { session }
       );
       // Notify seller (out of stock)
-      await sendListingNotification(
+      await sendNotification(
         userId,
         'listing_low_stock',
         `Your listing "${listing.productInfo.name}" is out of stock.`,
-        productId,
         null,
         session
       );
@@ -804,11 +767,10 @@ export const updateInventory = async (req, res) => {
       );
     } else if (inventory <= 5 && inventory > 0 && oldInventory > 5) {
       // Notify seller (low stock)
-      await sendListingNotification(
+      await sendNotification(
         userId,
         'listing_low_stock',
         `Your listing "${listing.productInfo.name}" is running low on stock (${inventory} left).`,
-        productId,
         null,
         session
       );
@@ -880,11 +842,10 @@ export const markAsUnSold = async (req, res) => {
       { session }
     );
 
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'listing_unsold',
       `Your listing "${listing.productInfo.name}" has been marked as unsold.`,
-      productId,
       null,
       session
     );
@@ -934,11 +895,10 @@ export const promoteListing = async (req, res) => {
     listing.promotedUntil = new Date(Date.now() + promotionDays * 24 * 60 * 60 * 1000);
     await listing.save({ session });
 
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'listing_promoted',
       `Your listing "${listing.productInfo.name}" has been promoted for ${promotionDays} days.`,
-      productId,
       null,
       session
     );
@@ -980,11 +940,10 @@ export const recordNegotiation = async (req, res) => {
     listing.analytics.negotiationAttempts = (listing.analytics.negotiationAttempts || 0) + 1;
     await listing.save({ session });
 
-    await sendListingNotification(
+    await sendNotification(
       listing.seller.sellerId,
       'listing_negotiation',
       `A negotiation attempt was made on your listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
-      productId,
       userId,
       session
     );
@@ -1039,11 +998,10 @@ export const transferGuestData = async (req, res) => {
       }
     }
 
-    await sendListingNotification(
+    await sendNotification(
       userId,
       'guest_data_transferred',
       `Your guest cart and wishlist data have been transferred to your account.`,
-      null,
       null,
       session
     );
@@ -1640,11 +1598,10 @@ export const featureListing = async (req, res) => {
     listing.promotedUntil = featured ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
     await listing.save({ session });
 
-    await sendListingNotification(
+    await sendNotification(
       listing.seller.sellerId,
       'listing_promoted',
       `Your listing "${listing.productInfo.name}" has been ${featured ? 'featured' : 'unfeatured'} by an admin.`,
-      productId,
       adminId,
       session
     );
@@ -1933,11 +1890,10 @@ export const verifyListing = async (req, res) => {
       status === 'Verified'
         ? `Your listing "${listing.productInfo.name}" has been manually verified by an admin and is now live!`
         : `Your listing "${listing.productInfo.name}" was manually rejected by an admin. AI Findings:\n${findingsSummary}`;
-    await sendListingNotification(
+    await sendNotification(
       listing.seller.sellerId,
       notificationType,
       notificationContent,
-      productId,
       adminId,
       session
     );

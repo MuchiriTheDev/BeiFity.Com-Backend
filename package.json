@@ -12,6 +12,7 @@
   "description": "",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@ngrok/ngrok": "^1.5.2",
     "axios": "^1.12.1",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",

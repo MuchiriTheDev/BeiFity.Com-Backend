@@ -10,6 +10,7 @@ import { ReportModel } from '../models/Report.js';
 import { orderModel } from '../models/Order.js';
 import { TransactionModel } from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import { sendNotification } from './notificationController.js';
 
 /**
  * Update Profile Views
@@ -509,6 +510,18 @@ export const addSellerReview = async (req, res) => {
       { new: true }
     );
 
+    // Send notification to seller about new review
+    try {
+      await sendNotification(
+        sellerId,
+        'review',
+        `${req.user.personalInfo.fullname} left you a ${rating}-star review: "${comment.trim()}"`,
+        req.user._id.toString()
+      );
+    } catch (notificationError) {
+      logger.warn(`Failed to send review notification to seller ${sellerId}: ${notificationError.message}`);
+    }
+
     logger.info(`Review added for seller ${sellerId} by user ${userId}`);
     return res.status(200).json({
       success: true,
@@ -552,6 +565,8 @@ export const removeSellerReview = async (req, res) => {
       logger.warn(`Seller review removal failed: Review ${reviewId} not found for seller ${sellerId}`);
       return res.status(404).json({ success: false, message: 'Review not found' });
     }
+
+    const removedReview = user.reviews[reviewIndex];
 
     user.reviews.splice(reviewIndex, 1);
 
@@ -629,22 +644,22 @@ export const deleteAccount = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Cannot delete account with active listings' });
     }
 
-    // const pendingBuyerOrders = await orderModel.countDocuments({ customerId: userId, status: { $nin: ['delivered', 'cancelled'] } }).session(session);
-    // if (pendingBuyerOrders > 0) {
-    //   await session.abortTransaction();
-    //   session.endSession();
-    //   return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as buyer' });
-    // }
+    const pendingBuyerOrders = await orderModel.countDocuments({ customerId: userId, status: { $nin: ['delivered', 'cancelled'] } }).session(session);
+    if (pendingBuyerOrders > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as buyer' });
+    }
 
-    // const pendingSellerItems = await orderModel.countDocuments({
-    //   'items.sellerId': userId,
-    //   'items.status': { $nin: ['delivered', 'cancelled'] }
-    // }).session(session);
-    // if (pendingSellerItems > 0) {
-    //   await session.abortTransaction();
-    //   session.endSession();
-    //   return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as seller' });
-    // }
+    const pendingSellerItems = await orderModel.countDocuments({
+      'items.sellerId': userId,
+      'items.status': { $nin: ['delivered', 'cancelled'] }
+    }).session(session);
+    if (pendingSellerItems > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ success: false, message: 'Cannot delete account with pending orders as seller' });
+    }
 
     // Delete user's listings (even inactive ones for cleanup)
     await listingModel.deleteMany({ 'seller.sellerId': userId }).session(session);

@@ -26,8 +26,9 @@ import { initializeSocket } from './utils/socket.js';
 import env from './config/env.js';
 import './utils/emailMarketing.js'
 import transactionRouter from './routes/transactionRoutes.js';
-import paystackRouter from './routes/paystackRoutes.js';
 import financialRouter from './routes/financialRoutes.js';
+import { connectNgrok } from './middlewares/ngrok.js';
+import swiftRouter from './routes/swiftRouter.js';
 
 const app = express();
 const cache = new NodeCache({ stdTTL: 3600 });
@@ -71,6 +72,7 @@ app.use((req, res, next) => {
   logger.info(`${req.method} ${req.url}`);
   next();
 });
+app.use(connectNgrok)
 
 // Configurations
 connectDB();
@@ -93,7 +95,7 @@ app.use('/api/notifications', notificationRouter);
 app.use('/api/report', reportRouter);
 app.use('/api/cloudinary', cloudinaryRouter);
 app.use('/api/transactions', transactionRouter); // Cache transaction routes
-app.use('/api/paystack', paystackRouter); // Paystack routes
+app.use('/api/payments', swiftRouter); // Paystack routes
 app.use('/api/financial', financialRouter); // Financial routes
 
 app.get('/', (req, res) => res.send('BeiFity API is running!'));

@@ -1,6 +1,6 @@
 import { Conversation, Message } from '../models/Message.js';
 import { userModel } from '../models/User.js';
-import { createNotification } from './notificationController.js';
+import { sendNotification } from './notificationController.js';
 import logger from '../utils/logger.js';
 import mongoose from 'mongoose';
 import sanitizeHtml from 'sanitize-html';
@@ -191,33 +191,19 @@ export const setupSocketHandlers = (io, socket) => {
 
       // Create notification with web push
       try {
-        const mockReq = {
-          user: {
-            _id: senderStr,
-            personalInfo: senderUser.personalInfo || { fullname: 'Unknown', isAdmin: false },
-          },
-          body: {
-            userId: receiverStr,
-            sender: senderStr,
-            type: 'message',
-            content: `New message from ${sanitizeHtml(senderUser.personalInfo?.fullname || 'Unknown')}: ${lastMessageText}`,
-          },
-        };
-        const mockRes = {
-          status: (code) => ({
-            json: (data) => {
-              logger.debug(`Notification response: ${JSON.stringify(data)}`);
-              if (data.success && data.data && receiverSocket) {
-                io.to(receiverSocket).emit('newNotification', data.data);
-                logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`, { notificationId: data.data._id });
-              }
-              return { statusCode: code, data };
-            },
-          }),
-        };
-
-        await createNotification(mockReq, mockRes);
-        logger.info(`Notification created for message to receiver ${receiverStr}`, { conversationId: conversation._id, messageId: message._id });
+        const notificationContent = `New message from ${sanitizeHtml(senderUser.personalInfo?.fullname || 'Unknown')}: ${lastMessageText}`;
+        const notification = await sendNotification(
+          receiverStr,
+          'message',
+          notificationContent,
+          senderStr,
+          session
+        );
+        logger.info(`Notification created for message to receiver ${receiverStr}`, { conversationId: conversation._id, messageId: message._id, notificationId: notification._id });
+        if (receiverSocket) {
+          io.to(receiverSocket).emit('newNotification', notification);
+          logger.info(`Emitted newNotification to receiver ${receiverStr} at socket ${receiverSocket}`, { notificationId: notification._id });
+        }
       } catch (error) {
         logger.error(`Error creating message notification: ${error.message}`, { stack: error.stack, sender: senderStr, receiver: receiverStr });
         socket.emit('error', { message: 'Failed to create message notification' });

@@ -8,7 +8,7 @@ const TransactionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    paystackReference: {
+    swiftReference: {
       type: String,
       required: true,
       unique: true,
@@ -24,12 +24,12 @@ const TransactionSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
-    paystackFee: {
+    swiftServiceFee: {
       type: Number,
       required: true,
       min: 0,
     },
-    netAmount: {
+    netReceived: {
       type: Number,
       required: true,
       min: 0,
@@ -38,14 +38,18 @@ const TransactionSchema = new mongoose.Schema(
       {
         itemId: { type: mongoose.Schema.Types.ObjectId, required: true },
         sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-        subaccountCode: { type: String, required: true },
         itemAmount: { type: Number, required: true, min: 0.01 },
         sellerShare: { type: Number, required: true, min: 0 },
         platformCommission: { type: Number, required: true, min: 0 },
         transferFee: { type: Number, default: 0 },
         netCommission: { type: Number, required: true, min: 0 },
-        payoutStatus: { type: String, enum: ['pending', 'transferred', 'failed'], default: 'pending' },
-        payoutReference: { type: String, default: null },
+        owedAmount: { type: Number, required: true, min: 0 },
+        payoutStatus: { 
+          type: String, 
+          enum: ['manual_pending', 'pending', 'transferred', 'failed'], 
+          default: 'manual_pending' 
+        },
+        swiftPayoutReference: { type: String, default: null },
         deliveryConfirmed: { type: Boolean, default: false },
         refundStatus: { type: String, enum: ['none', 'pending', 'returned', 'completed'], default: 'none' },
         refundedAmount: { type: Number, default: 0, min: 0 },
@@ -54,14 +58,14 @@ const TransactionSchema = new mongoose.Schema(
     ],
     status: {
       type: String,
-      enum: ['pending', 'completed', 'failed', 'reversed'],
+      enum: ['pending', 'swift_initiated', 'completed', 'failed', 'reversed'],
       default: 'pending',
     },
     isReversed: {
       type: Boolean,
       default: false,
     },
-    paymentMethod: { type: String },
+    paymentMethod: { type: String, default: 'M-Pesa' },
     paidAt: { type: Date },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
@@ -71,14 +75,18 @@ const TransactionSchema = new mongoose.Schema(
 
 TransactionSchema.pre('save', function (next) {
   const commissionRate = parseFloat(process.env.COMMISSION_RATE || 0.045);
-  this.paystackFee = this.totalAmount * 0.015;
-  this.netAmount = this.totalAmount - this.paystackFee;
+  const swiftFeeRate = parseFloat(process.env.SWIFT_FEE_RATE || 0.02); // Adjust based on SWIFT's actual fee structure
+  this.swiftServiceFee = this.totalAmount * swiftFeeRate;
+  this.netReceived = this.totalAmount - this.swiftServiceFee;
   this.items.forEach((item) => {
     item.platformCommission = item.itemAmount * commissionRate;
     item.sellerShare = item.itemAmount - item.platformCommission;
     item.transferFee = item.sellerShare <= 1500 ? 20 : item.sellerShare <= 20000 ? 40 : 60;
-    item.netCommission = item.platformCommission - (item.itemAmount / this.totalAmount) * this.paystackFee;
+    item.netCommission = item.platformCommission - (item.itemAmount / this.totalAmount) * this.swiftServiceFee;
     if (item.netCommission < 0) item.netCommission = 0;
+    item.owedAmount = item.sellerShare - item.transferFee;
+    if (item.owedAmount < 0) item.owedAmount = 0;
+    item.payoutStatus = 'manual_pending'; // Default to manual for no auto-splits
     if (!item.refundStatus) item.refundStatus = 'none';
     if (!item.refundedAmount) item.refundedAmount = 0;
     if (!item.returnStatus) item.returnStatus = 'none';
@@ -93,6 +101,7 @@ TransactionSchema.index({ 'items.payoutStatus': 1 });
 TransactionSchema.index({ 'items.deliveryConfirmed': 1 });
 TransactionSchema.index({ 'items.refundStatus': 1 });
 TransactionSchema.index({ 'items.returnStatus': 1 });
-TransactionSchema.index({ paystackReference: 1 });
+TransactionSchema.index({ 'items.owedAmount': 1 });
+TransactionSchema.index({ swiftReference: 1 });
 
 export const TransactionModel = mongoose.model('Transaction', TransactionSchema);

@@ -98,6 +98,170 @@ const getNotificationUrl = (type, sender, notificationId) => {
 };
 
 /**
+ * Core function to create and send a notification.
+ * This is a standalone, reusable function that can be called from anywhere in the backend.
+ * It handles validation, DB save, push notification, email fallback, and analytics updates.
+ * @param {string} userId - The ID of the user to notify
+ * @param {string} type - The type of notification (e.g., 'message', 'order')
+ * @param {string} content - The content of the notification
+ * @param {string} [sender] - Optional sender ID (userId or productId depending on type)
+ * @param {Object} [session] - Optional Mongoose session for transactions
+ * @returns {Promise<Object>} The created notification object
+ * @throws {Error} If validation fails or an error occurs
+ */
+export const sendNotification = async (userId, type, content, sender, session = null) => {
+  // Validate inputs with minimal strictness to reduce errors
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid userId');
+  }
+  const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status'];
+  if (!type || !validTypes.includes(type)) {
+    throw new Error(`Invalid type: must be one of ${validTypes.join(', ')}`);
+  }
+  if (!content || typeof content !== 'string') {
+    throw new Error('Content is required and must be a string');
+  }
+  if (sender && !mongoose.Types.ObjectId.isValid(sender) && typeof sender !== 'string') {
+    throw new Error('Invalid sender');
+  }
+
+  const isNewSession = !session;
+  if (isNewSession) {
+    session = await mongoose.startSession();
+    session.startTransaction();
+  }
+
+  try {
+    // Fetch user
+    const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Fetch sender details if provided
+    let senderDetails = null;
+    if (sender) {
+      senderDetails = await userModel.findById(sender).session(session);
+      if (!senderDetails && type !== 'new_product') { // For new_product, sender might be productId (string)
+        throw new Error('Sender not found');
+      }
+    }
+
+    // Sanitize content
+    const sanitizedContent = sanitizeHtml(content);
+
+    // Save notification
+    const notification = new notificationModel({
+      userId,
+      type,
+      content: sanitizedContent,
+      sender: sender || userId, // Default to userId if no sender
+    });
+    await notification.save({ session });
+
+    // Update analytics (non-critical, but wrapped in try-catch internally if needed)
+    try {
+      await userModel.updateOne(
+        { _id: userId },
+        { $inc: { 'analytics.notificationsReceived': 1 } },
+        { session }
+      );
+      if (sender && senderDetails) {
+        await userModel.updateOne(
+          { _id: sender },
+          { $inc: { 'analytics.notificationsSent': 1 } },
+          { session }
+        );
+      }
+    } catch (analyticsError) {
+      logger.warn(`Failed to update analytics for notification: ${analyticsError.message}`, { notificationId: notification._id });
+      // Don't throw; continue to ensure notification is sent
+    }
+
+    // Send push notification if subscription exists
+    let pushSent = false;
+    if (user.pushSubscription) {
+      const payload = JSON.stringify({
+        title: type === 'message' && senderDetails 
+          ? `New Message from ${senderDetails.personalInfo.fullname}` 
+          : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)}`,
+        body: sanitizedContent,
+        icon: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
+        badge: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
+        vibrate: [200, 100, 200],
+        timestamp: Date.now(),
+        actions: [
+          { action: 'view', title: 'View' },
+          { action: 'dismiss', title: 'Dismiss' },
+        ],
+        data: {
+          url: getNotificationUrl(type, sender || notification._id.toString(), notification._id.toString()),
+          notificationId: notification._id.toString(),
+        },
+      });
+
+      try {
+        await webpush.sendNotification(user.pushSubscription, payload);
+        pushSent = true;
+        logger.info(`Web push notification sent to user ${userId}`, { notificationId: notification._id, type });
+      } catch (pushError) {
+        logger.warn(`Failed to send web push to user ${userId}: ${pushError.message}`, { notificationId: notification._id, type });
+        // Don't throw; fallback to email
+      }
+    } else {
+      logger.debug(`No push subscription for user ${userId}; checking email fallback`, { notificationId: notification._id, type });
+    }
+
+    // Fallback to email if no push or push failed
+    if (!pushSent && user.personalInfo?.email && user.preferences?.emailNotifications) {
+      try {
+        const emailTitle = type === 'message' && senderDetails 
+          ? `New Message from ${senderDetails.personalInfo.fullname}` 
+          : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)} Notification`;
+        const emailContent = generateNotificationEmail(
+          user.personalInfo.fullname || 'User',
+          emailTitle,
+          content,
+          getNotificationUrl(type, sender || notification._id.toString(), notification._id.toString())
+        );
+        const emailSent = await sendEmail(
+          user.personalInfo.email,
+          `BeiFity Notification - ${type.charAt(0).toUpperCase() + type.slice(1)}`,
+          emailContent
+        );
+        if (emailSent) {
+          logger.info(`Fallback email sent to user ${userId}`, { notificationId: notification._id, type });
+        } else {
+          logger.warn(`Failed to send fallback email to user ${userId}`, { notificationId: notification._id, type });
+        }
+      } catch (emailError) {
+        logger.error(`Error in email fallback: ${emailError.message}`, { notificationId: notification._id, type });
+        // Don't throw; notification is already saved
+      }
+    }
+
+    if (isNewSession) {
+      await session.commitTransaction();
+    }
+
+    logger.info(`Notification created successfully for user ${userId}`, { notificationId: notification._id, type });
+    return notification;
+  } catch (error) {
+    console.log(error)
+    if (isNewSession) {
+      await session.abortTransaction();
+    }
+    logger.error(`Error in sendNotification: ${error.message}`, { userId, type, sender, stack: error.stack });
+    throw error;
+    
+  } finally {
+    if (isNewSession) {
+      session.endSession();
+    }
+  }
+};
+
+/**
  * Save Push Subscription
  * @route POST /api/notifications/subscribe
  * @desc Save a user's push notification subscription
@@ -141,155 +305,6 @@ export const savePushSubscription = async (req, res) => {
     await session.abortTransaction();
     logger.error(`Error saving push subscription: ${error.message}`, { stack: error.stack, userId: req.user?._id });
     res.status(500).json({ success: false, message: 'Server error while saving subscription' });
-  } finally {
-    session.endSession();
-  }
-};
-
-/**
- * Create Notification
- * @route POST /api/notifications
- * @desc Create and send a notification to a user with web push
- * @access Private (requires JWT token)
- */
-export const  createNotification = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    if (!req.user) {
-      logger.warn('Create notification failed: No user data in request');
-      return res.status(401).json({ success: false, message: 'Authentication required' });
-    }
-
-    const { userId, type, content, sender } = req.body;
-    const requesterId = req.user._id.toString();
-
-    // Validate inputs
-    const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status'];
-    if (!userId || !type || !content) {
-      logger.warn(`Create notification failed: Missing required fields`, { requesterId });
-      return res.status(400).json({ success: false, message: 'userId, type, and content are required' });
-    }
-    if (!validTypes.includes(type)) {
-      logger.warn(`Create notification failed: Invalid type ${type}`, { requesterId });
-      return res.status(400).json({ success: false, message: `Type must be one of ${validTypes.join(', ')}` });
-    }
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      logger.warn(`Create notification failed: Invalid userId ${userId}`, { requesterId });
-      return res.status(400).json({ success: false, message: 'Invalid userId' });
-    }
-    if (sender && !mongoose.Types.ObjectId.isValid(sender)) {
-      logger.warn(`Create notification failed: Invalid sender ${sender}`, { requesterId });
-      return res.status(400).json({ success: false, message: 'Invalid sender' });
-    }
-
-    // Validate users
-    const user = await userModel.findById(userId).session(session);
-    if (!user) {
-      logger.warn(`Create notification failed: User ${userId} not found`, { requesterId });
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    let senderDetails = null;
-    if (sender) {
-      senderDetails = await userModel.findById(sender).session(session);
-      if (!senderDetails) {
-        logger.warn(`Create notification failed: Sender ${sender} not found`, { requesterId });
-        return res.status(404).json({ success: false, message: 'Sender not found' });
-      }
-    }
-
-    // Authorization: Allow notifications if requester is sender or admin
-    const isAdmin = await userModel.findById(requesterId).session(session).then(user => user?.personalInfo?.isAdmin);
-    if (sender && sender !== requesterId && !isAdmin) {
-      logger.warn(`Create notification failed: User ${requesterId} unauthorized to send as ${sender}`, { userId });
-      return res.status(403).json({ success: false, message: 'Unauthorized to create notification' });
-    }
-
-    // Save notification
-    const notification = new notificationModel({
-      userId,
-      type,
-      content: sanitizeHtml(content),
-      sender: sender || requesterId,
-    });
-    await notification.save({ session });
-
-    // Update user analytics
-    await userModel.updateOne(
-      { _id: userId },
-      { $inc: { 'analytics.notificationsReceived': 1 } },
-      { session }
-    );
-    if (sender) {
-      await userModel.updateOne(
-        { _id: sender },
-        { $inc: { 'analytics.notificationsSent': 1 } },
-        { session }
-      );
-    }
-
-    // Prepare push notification
-    let pushSent = false;
-    if (user.pushSubscription) {
-      const payload = JSON.stringify({
-        title: type === 'message' && senderDetails ? `New Message from ${senderDetails.personalInfo.fullname}` : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)}`,
-        body: sanitizeHtml(content),
-        icon: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
-        badge: `https://gateway.pinata.cloud/ipfs/bafkreic5tdfcolsevsqf7bvj6alvzzbvbm2u2memwrrpzqk7jgtpk3ydg4`,
-        vibrate: [200, 100, 200],
-        timestamp: Date.now(),
-        actions: [
-          { action: 'view', title: 'View' },
-          { action: 'dismiss', title: 'Dismiss' },
-        ],
-        data: {
-          url: getNotificationUrl(type, sender || notification._id, notification._id),
-          notificationId: notification._id.toString(),
-        },
-      });
-
-      try {
-        await webpush.sendNotification(user.pushSubscription, payload);
-        pushSent = true;
-        logger.info(`Web push notification sent to user ${userId}`, { notificationId: notification._id, type });
-      } catch (pushError) {
-        logger.warn(`Failed to send web push notification to user ${userId}: ${pushError.message}`, { notificationId: notification._id, type });
-      }
-    } else {
-      logger.info(`No push subscription found for user ${userId}, falling back to email`, { notificationId: notification._id, type });
-    }
-
-    // Fallback to email if push fails or no subscription
-    if (!pushSent && user.personalInfo?.email && user.preferences?.emailNotifications) {
-      const emailContent = generateNotificationEmail(
-        user.personalInfo.fullname || 'User',
-        type === 'message' && senderDetails ? `New Message from ${senderDetails.personalInfo.fullname}` : `BeiFity ${type.charAt(0).toUpperCase() + type.slice(1)} Notification`,
-        content,
-        getNotificationUrl(type, sender || notification._id, notification._id)
-      );
-      const emailSent = await sendEmail(
-        user.personalInfo.email,
-        `BeiFity Notification - ${type.charAt(0).toUpperCase() + type.slice(1)}`,
-        emailContent
-      );
-      if (emailSent) {
-        logger.info(`Fallback email notification sent to user ${userId}`, { notificationId: notification._id, type });
-      } else {
-        logger.warn(`Failed to send fallback email to user ${userId}`, { notificationId: notification._id, type });
-      }
-    }
-
-    await session.commitTransaction();
-    logger.info(`Notification created for user ${userId} by ${requesterId}`, { notificationId: notification._id, type });
-    res.status(201).json({
-      success: true,
-      message: 'Notification created successfully',
-      data: notification,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    logger.error(`Error creating notification: ${error.message}`, { stack: error.stack, userId: req.body.userId, requesterId: req.user?._id });
-    res.status(500).json({ success: false, message: 'Server error while creating notification' });
   } finally {
     session.endSession();
   }

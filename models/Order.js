@@ -36,6 +36,7 @@ const orderSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true, min: 0 },
     deliveryFee: { type: Number, required: true, min: 0, default: 0 },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    swiftTransactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null }, // Parallel for migration
     status: { type: String, enum: ['pending', 'paid', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
     items: [itemSchema],
     deliveryAddress: deliveryAddressSchema,

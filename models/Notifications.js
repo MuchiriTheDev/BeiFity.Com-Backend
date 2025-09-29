@@ -9,7 +9,7 @@ const notificationSchema = new mongoose.Schema({
   sender: {
     type: mongoose.Schema.Types.ObjectId, // Reference to the User model
     ref: "User", // Assuming you have a User model
-    required: true,
+    required: true, 
   },
   type: {
     type: String, // e.g., "message", "order", "new_product"

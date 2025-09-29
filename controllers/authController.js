@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import logger from '../utils/logger.js';
 import env from '../config/env.js';
 import mongoose from 'mongoose';
+import { sendNotification } from './notificationController.js';
 
 const googleClient = new OAuth2Client(env.CLIENT_ID);
 
@@ -198,27 +199,17 @@ export const signup = async (req, res) => {
     // Notify admin of new user signup
     const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
     if (admin) {
-      const adminEmailSent = await sendEmail(
-        admin.personalInfo.email,
-        'New User Signup at BeiFity.Com',
-        createEmailTemplate(
-          'New User Signup',
-          `Hello Admin,`,
-          `A new user has signed up on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.<br><br>
-          <strong>User Details:</strong><br>
-          Full Name: ${newUser.personalInfo.fullname}<br>
-          Email: ${newUser.personalInfo.email}<br>
-          Username: ${newUser.personalInfo.username}<br>
-          Phone: ${newUser.personalInfo.phone}<br>
-          Referral Code: ${referralCode || 'None'}`,
-          `Chat with ${newUser.personalInfo.fullname}`,
-          `${env.FRONTEND_URL}/chat/${newUser._id}`
-        )
+      const adminNotification = await sendNotification(
+        admin._id.toString(),
+        'report',
+        `New User Signup Details:\nFull Name: ${newUser.personalInfo.fullname}\nEmail: ${newUser.personalInfo.email}\nUsername: ${newUser.personalInfo.username}\nPhone: ${newUser.personalInfo.phone}\nReferral Code: ${referralCode || 'None'}`,
+        newUser._id.toString(),
+        session
       );
-      if (!adminEmailSent) {
-        logger.warn(`Failed to send admin notification for new user: ${newUser._id}`);
-      } else {
+      if (adminNotification) {
         logger.info(`Admin notified of new user signup: ${newUser._id}`);
+      } else {
+        logger.warn(`Failed to notify admin of new user: ${newUser._id}`);
       }
     } else {
       logger.warn('No admin found for notification');
@@ -289,26 +280,17 @@ export const verification = async (req, res) => {
     // Notify admin of email verification
     const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
     if (admin) {
-      const adminEmailSent = await sendEmail(
-        admin.personalInfo.email,
-        'User Email Verified at BeiFity.Com',
-        createEmailTemplate(
-          'User Email Verified',
-          `Hello Admin,`,
-          `A user has verified their email on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.<br><br>
-          <strong>User Details:</strong><br>
-          Full Name: ${user.personalInfo.fullname}<br>
-          Email: ${user.personalInfo.email}<br>
-          Username: ${user.personalInfo.username}<br>
-          Phone: ${user.personalInfo.phone}`,
-          'Check User Store',
-          `${env.FRONTEND_URL}/store/@${user.personalInfo.username}/${user._id}`
-        )
+      const adminNotification = await sendNotification(
+        admin._id.toString(),
+        'report',
+        `User Email Verified Details:\nFull Name: ${user.personalInfo.fullname}\nEmail: ${user.personalInfo.email}\nUsername: ${user.personalInfo.username}\nPhone: ${user.personalInfo.phone}`,
+        user._id.toString(),
+        session
       );
-      if (!adminEmailSent) {
-        logger.warn(`Failed to send admin notification for email verification: ${user._id}`);
-      } else {
+      if (adminNotification) {
         logger.info(`Admin notified of email verification: ${user._id}`);
+      } else {
+        logger.warn(`Failed to notify admin of email verification: ${user._id}`);
       }
     } else {
       logger.warn('No admin found for notification');

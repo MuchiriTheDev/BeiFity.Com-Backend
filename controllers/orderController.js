@@ -7,8 +7,8 @@ import sanitizeHtml from 'sanitize-html';
 import validator from 'validator';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/sendEmail.js';
-import { createNotification } from './notificationController.js';
-import { initializePayment, createSubaccount, initiatePayout, initiateRefund } from './paystackController.js';
+import { sendNotification } from './notificationController.js';
+import { initializePayment, initiatePayout, initiateRefund } from './swiftController.js';
 import {
   generateOrderEmailAdmin,
   generateOrderEmailBuyer,
@@ -136,6 +136,7 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid user email required for payment' });
     }
 
+    const listings = new Map();
     for (const item of items) {
       if (!mongoose.Types.ObjectId.isValid(item.sellerId)) {
         logger.warn(`Place order failed: Invalid sellerId ${item.sellerId}`, { userId: requesterId, productId: item.productId, ip: req.ip });
@@ -147,61 +148,6 @@ export const placeOrder = async (req, res) => {
         return res.status(404).json({ success: false, message: `Seller ${item.sellerId} not found` });
       }
 
-      if (!seller.personalInfo.subaccount_code) {
-        let subaccountData;
-        let phoneNumber;
-        if (seller.personalInfo.mobileMoneyDetails?.phoneNumber) {
-          phoneNumber = seller.personalInfo.mobileMoneyDetails.phoneNumber;
-        } else {
-          if (!seller.personalInfo.fullname || !seller.personalInfo.phone) {
-            logger.warn(`Place order failed: Seller ${item.sellerId} missing fullname or phone`, { userId: requesterId, productId: item.productId, ip: req.ip });
-            return res.status(400).json({ success: false, message: `Seller ${item.sellerId} missing required fullname or phone for M-Pesa` });
-          }
-          phoneNumber = seller.personalInfo.phone;
-        }
-
-        if (phoneNumber.startsWith('254')) {
-          phoneNumber = '0' + phoneNumber.slice(3);
-        } else if (phoneNumber.startsWith('+254')) {
-          phoneNumber = '0' + phoneNumber.slice(4);
-        }
-
-        if (!/^0[0-9]{9}$/.test(phoneNumber)) {
-          logger.warn(`Invalid phone number format for subaccount: ${phoneNumber}`, { sellerId: item.sellerId, ip: req.ip });
-          return res.status(400).json({ success: false, message: `Invalid phone number format for seller ${item.sellerId}` });
-        }
-
-        subaccountData = {
-          business_name: sanitizeHtml(seller.personalInfo.mobileMoneyDetails?.accountName || seller.personalInfo.fullname || 'Seller'),
-          account_number: sanitizeHtml(phoneNumber),
-          bank_code: '231',
-        };
-
-        try {
-          const subaccountReq = { user: { _id: seller._id, personalInfo: seller.personalInfo }, body: subaccountData };
-          const subaccountResult = await withRetry(() => createSubaccount(subaccountReq, {
-            status: () => ({
-              json: async data => {
-                if (!data.success) {
-                  logger.error(`Subaccount creation failed: ${data.message || 'No error message provided'}`, { subaccountData, sellerId: item.sellerId, ip: req.ip });
-                  throw new Error(data.message || 'Failed to create subaccount');
-                }
-                return data;
-              },
-            }),
-          }), 3, `Create subaccount for seller ${item.sellerId}`);
-          seller.personalInfo.subaccount_code = subaccountResult.data.subaccount_code;
-          await seller.save({ session });
-          logger.info(`Subaccount created for seller ${item.sellerId}`, { subaccount_code: subaccountResult.data.subaccount_code });
-        } catch (subaccountError) {
-          logger.error(`Failed to create subaccount for seller ${item.sellerId} after retries`, { error: subaccountError.message, subaccountData, ip: req.ip });
-          throw new Error(`Failed to create subaccount for seller ${item.sellerId}: ${subaccountError.message}`);
-        }
-      }
-    }
-
-    const listings = new Map();
-    for (const item of items) {
       const listing = await listingModel.findOne({
         'productInfo.productId': item.productId,
         verified: 'Verified',
@@ -306,7 +252,7 @@ export const placeOrder = async (req, res) => {
           savedOrder.deliveryAddress,
           savedOrder.orderId,
           [...new Set(savedOrder.items.map(item => item.sellerId.toString()))],
-          paymentResult.authorization_url
+          null // No URL for STK Push; check phone for M-Pesa prompt
         );
         const buyerEmailSent = await sendEmail(user.personalInfo.email, 'Your Order Confirmation - BeiFity.Com', buyerEmailContent);
         if (!buyerEmailSent) throw new Error('Failed to send buyer email');
@@ -316,20 +262,13 @@ export const placeOrder = async (req, res) => {
       logger.info(`Buyer ${customerId} has email notifications disabled`, { orderId: savedOrder.orderId });
     }
 
-    await withRetry(async () => {
-      const buyerNotificationReq = {
-        user: { _id: customerId, personalInfo: user.personalInfo || {} },
-        body: { userId: customerId, sender: customerId, type: 'order', content: `Your order (ID: ${savedOrder.orderId}) has been placed. Complete payment to proceed.` },
-      };
-      await createNotification(buyerNotificationReq, {
-        status: () => ({
-          json: data => {
-            if (!data.success) throw new Error(`Failed to create buyer notification: ${data.message}`);
-            logger.info(`Order notification created for buyer ${customerId}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
-          },
-        }),
-      });
-    }, 3, `Create buyer notification for order ${savedOrder.orderId}`);
+    const buyerNotificationContent = `Your order (ID: ${savedOrder.orderId}) has been placed. Check your phone for M-Pesa payment prompt.`;
+    try {
+      await sendNotification(customerId, 'order', buyerNotificationContent, customerId);
+      logger.info(`Order notification created for buyer ${customerId}`, { orderId: savedOrder.orderId });
+    } catch (notificationError) {
+      logger.warn(`Failed to create buyer notification: ${notificationError.message}`, { orderId: savedOrder.orderId });
+    }
 
     for (const [sellerId, items] of sellerItemsMap) {
       const seller = await userModel.findById(sellerId).session(session);
@@ -351,7 +290,7 @@ export const placeOrder = async (req, res) => {
             totalPrice,
             customerId,
             savedOrder.orderId,
-            paymentResult.authorization_url
+            null // No URL; payment via M-Pesa
           );
           const sellerEmailSent = await sendEmail(seller.personalInfo.email, 'New Order for Your Product(s) - BeiFity.Com', sellerEmailContent);
           if (!sellerEmailSent) throw new Error('Failed to send seller email');
@@ -361,43 +300,24 @@ export const placeOrder = async (req, res) => {
         logger.info(`Seller ${sellerId} has email notifications disabled`, { orderId: savedOrder.orderId });
       }
 
-      await withRetry(async () => {
-        const sellerNotificationReq = {
-          user: { _id: sellerId, personalInfo: seller.personalInfo || {} },
-          body: { userId: sellerId, sender: customerId, type: 'order', content: `You have a new order (ID: ${savedOrder.orderId}) for ${items.map(i => sanitizeHtml(i.name)).join(', ')}. Wait for payment confirmation.` },
-        };
-        await createNotification(sellerNotificationReq, {
-          status: () => ({
-            json: data => {
-              if (!data.success) logger.warn(`Failed to create seller notification: ${data.message}`, { orderId: savedOrder.orderId, sellerId });
-              logger.info(`Order notification created for seller ${sellerId}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
-            },
-          }),
-        });
-      }, 3, `Create seller notification for order ${savedOrder.orderId} to seller ${sellerId}`);
+      const sellerNotificationContent = `You have a new order (ID: ${savedOrder.orderId}) for ${items.map(i => sanitizeHtml(i.name)).join(', ')}. Wait for payment confirmation.`;
+      try {
+        await sendNotification(sellerId, 'order', sellerNotificationContent, customerId);
+        logger.info(`Order notification created for seller ${sellerId}`, { orderId: savedOrder.orderId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create seller notification: ${notificationError.message}`, { orderId: savedOrder.orderId, sellerId });
+      }
     }
 
     const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
     for (const admin of admins) {
-      await withRetry(async () => {
-        const adminNotificationReq = {
-          user: { _id: admin._id, personalInfo: admin.personalInfo || {} },
-          body: {
-            userId: admin._id.toString(),
-            sender: customerId,
-            type: 'order',
-            content: `A new order (ID: ${savedOrder.orderId}) has been placed by ${buyerName} for a total of KES ${totalOrderPrice}. Payment is pending.`,
-          },
-        };
-        await createNotification(adminNotificationReq, {
-          status: () => ({
-            json: data => {
-              if (!data.success) throw new Error(`Failed to create admin notification: ${data.message}`);
-              logger.info(`Order notification created for admin ${admin._id}`, { orderId: savedOrder.orderId, notificationId: data.data?._id });
-            },
-          }),
-        });
-      }, 3, `Create admin notification for order ${savedOrder.orderId} to admin ${admin._id}`);
+      const adminNotificationContent = `A new order (ID: ${savedOrder.orderId}) has been placed by ${buyerName} for a total of KES ${totalOrderPrice}. Payment is pending.`;
+      try {
+        await sendNotification(admin._id.toString(), 'order', adminNotificationContent, customerId);
+        logger.info(`Order notification created for admin ${admin._id}`, { orderId: savedOrder.orderId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create admin notification: ${notificationError.message}`, { orderId: savedOrder.orderId, adminId: admin._id });
+      }
 
       if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
         await withRetry(async () => {
@@ -422,8 +342,8 @@ export const placeOrder = async (req, res) => {
     logger.info(`Order placed successfully: ${savedOrder.orderId} by user ${requesterId}`);
     res.status(201).json({
       success: true,
-      message: 'Order placed successfully. Complete payment to proceed.',
-      data: { order: savedOrder, authorization_url: paymentResult.authorization_url, reference: paymentResult.reference },
+      message: 'Order placed successfully. Check your phone for M-Pesa payment prompt.',
+      data: { order: savedOrder, authorization_url: null, reference: paymentResult.reference },
     });
   } catch (error) {
     if (!transactionCommitted) {
@@ -436,6 +356,73 @@ export const placeOrder = async (req, res) => {
     session.endSession();
   }
 };
+
+export const retryOrderPayment = async (req, res) => {
+  const session = await mongoose.startSession({ defaultTransactionOptions: { timeout: SESSION_TIMEOUT } });
+  let transactionCommitted = false;
+  session.startTransaction();
+  try { 
+    if (!req.user) {
+      logger.warn('Retry order payment failed: No user data in request', { ip: req.ip }); 
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    const { orderId } = req.params;
+    const { phone } = req.body;
+    const requesterId = req.user._id.toString();
+    if (!orderId) {
+      logger.warn('Retry order payment failed: Missing orderId', { userId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Missing orderId parameter' });
+    }
+    const order = await orderModel.findOne({ orderId }).session(session);
+    if (!order) {
+      logger.warn(`Retry order payment failed: Order ${orderId} not found`, { userId: requesterId, ip: req.ip });
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+    if (order.customerId.toString() !== requesterId) {
+      logger.warn(`Retry order payment failed: User ${requesterId} attempted to access order ${orderId} owned by ${order.customerId}`, { ip: req.ip });
+      return res.status(403).json({ success: false, message: 'Unauthorized to access this order' });
+    }
+    if (order.status !== 'pending') {
+      logger.warn(`Retry order payment failed: Order ${orderId} is not pending`, { userId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Only pending orders can retry payment' });
+    }
+    if (!phone || !/^\+?254[0-9]{9}$/.test(phone)) {
+      logger.warn('Retry order payment failed: Invalid phone', { userId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Valid Kenyan phone number required' });
+    }
+    const user = await userModel.findById(requesterId).session(session);
+    if (!user) {
+      logger.warn(`Retry order payment failed: User ${requesterId} not found`, { ip: req.ip });
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (!user.personalInfo.email || !validator.isEmail(user.personalInfo.email)) {
+      logger.warn('Retry order payment failed: Invalid or missing user email', { userId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Valid user email required for payment' });
+    }
+    const paymentResult = await withRetry(() => initializePayment(order._id, session, user.personalInfo.email, order.deliveryFee, phone), 3, `Initialize payment for order ${order.orderId}`);
+    if (paymentResult.error) {
+      logger.warn(`Retry order payment failed: Payment initialization failed - ${paymentResult.message}`, { userId: requesterId, orderId: order.orderId });
+      throw new Error(paymentResult.message);
+    }
+    await session.commitTransaction();
+    transactionCommitted = true;
+    logger.info(`Transaction committed for payment retry of order ${order.orderId}`, { userId: requesterId });
+    res.status(200).json({
+      success: true,
+      message: 'Payment initialization successful. Check your phone for M-Pesa payment prompt.',
+      data: { authorization_url: null, reference: paymentResult.reference },
+    });
+  } catch (error) {
+    if (!transactionCommitted) {
+      await session.abortTransaction();
+      logger.info(`Transaction aborted for payment retry attempt`, { userId: req.user?._id });
+    }
+    logger.error(`Error retrying order payment: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    res.status(500).json({ success: false, message: `Server error: ${error.message}` });
+  } finally {
+    session.endSession();
+  }
+}
 
 /**
  * Update Order Status
@@ -565,7 +552,7 @@ export const updateOrderStatus = async (req, res) => {
         logger.warn(`Update order status failed: Transaction item not found for item ${itemIndex}`, { userId, orderId, ip: req.ip });
         throw new Error('Transaction item not found');
       }
-      if (transactionItem.payoutStatus !== 'pending') {
+      if (transactionItem.payoutStatus !== 'manual_pending') {
         logger.warn(`Payout already processed for item ${itemIndex}`, { userId, orderId, ip: req.ip });
       } else {
         await withRetry(() => initiatePayout(transaction._id, transactionItem.itemId, session), 3, `Initiate payout for item ${itemIndex} in order ${orderId}`);
@@ -606,49 +593,25 @@ export const updateOrderStatus = async (req, res) => {
 
     const notificationRecipientId = ['processing', 'shipped', 'out_for_delivery'].includes(status) ? order.customerId._id : item.sellerId._id;
     const notificationRecipient = ['processing', 'shipped', 'out_for_delivery'].includes(status) ? order.customerId : item.sellerId;
-    await withRetry(async () => {
-      const notificationReq = {
-        user: { _id: notificationRecipientId, personalInfo: notificationRecipient.personalInfo || {} },
-        body: {
-          userId: notificationRecipientId.toString(),
-          sender: userId,
-          type: 'order_status',
-          content: `Your order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}) is now ${status}.`,
-        },
-      };
-      await createNotification(notificationReq, {
-        status: () => ({
-          json: data => {
-            if (!data.success) throw new Error(`Failed to create status notification: ${data.message}`);
-            logger.info(`Status notification created for ${['processing', 'shipped', 'out_for_delivery'].includes(status) ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, notificationId: data.data?._id });
-          },
-        }),
-      });
-    }, 3, `Create status notification for item ${itemIndex} in order ${orderId}`);
+    const notificationContent = `Your order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}) is now ${status}.`;
+    try {
+      await sendNotification(notificationRecipientId.toString(), 'order_status', notificationContent, userId, session);
+      logger.info(`Status notification created for ${['processing', 'shipped', 'out_for_delivery'].includes(status) ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, itemIndex });
+    } catch (notificationError) {
+      logger.warn(`Failed to create status notification: ${notificationError.message}`, { orderId, itemIndex });
+    }
 
     // Notify admins when status is 'delivered'
     if (status === 'delivered') {
       const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
       for (const admin of admins) {
-        await withRetry(async () => {
-          const adminNotificationReq = {
-            user: { _id: admin._id, personalInfo: admin.personalInfo || {} },
-            body: {
-              userId: admin._id.toString(),
-              sender: userId,
-              type: 'order_status',
-              content: `Order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}) has been marked as delivered by the buyer (ID: ${order.customerId._id}).`,
-            },
-          };
-          await createNotification(adminNotificationReq, {
-            status: () => ({
-              json: data => {
-                if (!data.success) throw new Error(`Failed to create admin status notification: ${data.message}`);
-                logger.info(`Status notification created for admin ${admin._id}`, { orderId, itemIndex, notificationId: data.data?._id });
-              },
-            }),
-          });
-        }, 3, `Create admin status notification for item ${itemIndex} in order ${orderId}`);
+        const adminNotificationContent = `Order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}) has been marked as delivered by the buyer (ID: ${order.customerId._id}).`;
+        try {
+          await sendNotification(admin._id.toString(), 'order_status', adminNotificationContent, userId, session);
+          logger.info(`Status notification created for admin ${admin._id}`, { orderId, itemIndex });
+        } catch (notificationError) {
+          logger.warn(`Failed to create admin status notification: ${notificationError.message}`, { orderId, itemIndex, adminId: admin._id });
+        }
 
         if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
           await withRetry(async () => {
@@ -761,8 +724,8 @@ export const cancelOrderItem = async (req, res) => {
     let refundStatus = 'none';
     let refundedAmount = 0;
 
-    if (order.transactionId) {
-      const transaction = await TransactionModel.findOne({ _id: order.transactionId }).session(session);
+    if (order.swiftTransactionId) {
+      const transaction = await TransactionModel.findOne({ _id: order.swiftTransactionId }).session(session);
       if (!transaction) {
         logger.warn(`Cancel order item failed: Transaction not found for order ${orderId}`, { userId, ip: req.ip });
         throw new Error('Transaction not found for order');
@@ -791,14 +754,14 @@ export const cancelOrderItem = async (req, res) => {
       }
 
       if (transaction.status === 'completed') {
-        logger.debug(`Initiating refund for item ${itemId} in order ${orderId}, transaction status: ${transaction.status}`, { userId, ip: req.ip });
+        logger.debug(`Initiating manual refund for item ${itemId} in order ${orderId}, transaction status: ${transaction.status}`, { userId, ip: req.ip });
         const refundResult = await withRetry(() => initiateRefund(order._id, item.productId, session), 3, `Initiate refund for item ${itemId} in order ${orderId}`);
         if (refundResult.error) {
           logger.warn(`Failed to initiate refund for item ${itemId} in order ${orderId}: ${refundResult.message}`, { userId, ip: req.ip, refundError: refundResult });
           refundMessage = ` (refund failed: ${refundResult.message})`;
           throw new Error(refundResult.message);
         } else {
-          refundMessage = ` (refund of KES ${item.price * item.quantity} initiated)`;
+          refundMessage = ` (refund will be processed as soon as possible)`;
           refundStatus = 'pending';
           refundedAmount = item.price * item.quantity;
           item.refundStatus = 'pending';
@@ -854,7 +817,7 @@ export const cancelOrderItem = async (req, res) => {
           item.name,
           orderId,
           item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
-          refundMessage.includes('refund initiated') ? `A refund of KES ${item.price * item.quantity} has been initiated for the buyer.` : refundMessage,
+          refundMessage.includes('refund') ? `A refund of KES ${item.price * item.quantity} will be processed as soon as possible.` : refundMessage,
           userId
         );
         const emailSent = await sendEmail(
@@ -871,51 +834,24 @@ export const cancelOrderItem = async (req, res) => {
 
     const notificationRecipientId = item.sellerId._id.toString() === userId ? order.customerId._id : item.sellerId._id;
     const notificationRecipient = item.sellerId._id.toString() === userId ? order.customerId : item.sellerId;
-    await withRetry(async () => {
-      const notificationReq = {
-        user: { _id: notificationRecipientId, personalInfo: notificationRecipient.personalInfo || {} },
-        body: {
-          userId: notificationRecipientId.toString(),
-          sender: userId,
-          type: 'order_cancellation',
-          content: `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`,
-        },
-      };
-      await createNotification(notificationReq, {
-        status: () => ({
-          json: data => {
-            if (!data.success) {
-              logger.warn(`Failed to create cancellation notification: ${data.message}`, { orderId, itemId });
-            } else {
-              logger.info(`Cancellation notification created for ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, notificationId: data.data?._id });
-            }
-          },
-        }),
-      });
-    }, 3, `Create cancellation notification for item ${itemId} in order ${orderId}`);
+    const notificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
+    try {
+      await sendNotification(notificationRecipientId.toString(), 'order_cancellation', notificationContent, userId, session);
+      logger.info(`Cancellation notification created for ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, itemId });
+    } catch (notificationError) {
+      logger.warn(`Failed to create cancellation notification: ${notificationError.message}`, { orderId, itemId });
+    }
 
     // Notify admins of cancellation
     const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
     for (const admin of admins) {
-      await withRetry(async () => {
-        const adminNotificationReq = {
-          user: { _id: admin._id, personalInfo: admin.personalInfo || {} },
-          body: {
-            userId: admin._id.toString(),
-            sender: userId,
-            type: 'order_cancellation',
-            content: `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} (ID: ${userId}) cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`,
-          },
-        };
-        await createNotification(adminNotificationReq, {
-          status: () => ({
-            json: data => {
-              if (!data.success) throw new Error(`Failed to create admin cancellation notification: ${data.message}`);
-              logger.info(`Cancellation notification created for admin ${admin._id}`, { orderId, itemId, notificationId: data.data?._id });
-            },
-          }),
-        });
-      }, 3, `Create admin cancellation notification for item ${itemId} in order ${orderId}`);
+      const adminNotificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} (ID: ${userId}) cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
+      try {
+        await sendNotification(admin._id.toString(), 'order_cancellation', adminNotificationContent, userId, session);
+        logger.info(`Cancellation notification created for admin ${admin._id}`, { orderId, itemId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create admin cancellation notification: ${notificationError.message}`, { orderId, itemId, adminId: admin._id });
+      }
 
       if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
         await withRetry(async () => {
@@ -924,7 +860,7 @@ export const cancelOrderItem = async (req, res) => {
             item.name,
             orderId,
             item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
-            refundMessage.includes('refund initiated') ? `A refund of KES ${item.price * item.quantity} has been initiated for the buyer.` : refundMessage,
+            refundMessage.includes('refund') ? `A refund of KES ${item.price * item.quantity} will be processed as soon as possible.` : refundMessage,
             userId
           );
           const adminEmailSent = await sendEmail(
@@ -1077,7 +1013,7 @@ export const getBuyerOrders = async (req, res) => {
       .find({ customerId })
       .populate('items.sellerId', 'personalInfo.fullname personalInfo.email personalInfo.phone')
       .lean();
-
+    console.log(orders[orders.length - 1].items[0].sellerId.personalInfo);
     if (!orders || orders.length === 0) {
       logger.info(`No orders found for buyer ${customerId}`);
       return res.status(200).json({ success: true, data: [], message: 'No orders found for this buyer' });
@@ -1099,10 +1035,10 @@ export const getBuyerOrders = async (req, res) => {
         refundStatus: item.refundStatus || 'none',
         refundedAmount: item.refundedAmount || 0,
         seller: {
-          id: item.sellerId._id,
-          fullname: sanitizeHtml(item.sellerId.personalInfo.fullname || 'Unknown'),
-          email: sanitizeHtml(item.sellerId.personalInfo.email || ''),
-          phone: sanitizeHtml(item.sellerId.personalInfo.phone || ''),
+          id: item.sellerId,
+          fullname: sanitizeHtml(item.sellerId?.personalInfo?.fullname || 'Unknown'),
+          email: sanitizeHtml(item.sellerId?.personalInfo?.email || ''),
+          phone: sanitizeHtml(item.sellerId?.personalInfo?.phone || ''),
         },
       })),
       deliveryAddress: {
@@ -1123,6 +1059,7 @@ export const getBuyerOrders = async (req, res) => {
       data: formattedOrders,
     });
   } catch (error) {
+    console.error(error);
     logger.error(`Error fetching buyer orders: ${error.message}`, { stack: error.stack, userId: req.user?._id });
     return res.status(500).json({ success: false, message: `Server error: ${error.message}` });
   }

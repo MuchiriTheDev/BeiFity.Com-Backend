@@ -72,17 +72,13 @@ const UserSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
-      subaccount_code: { type: String, default: null }, // Paystack subaccount code
-      recipient_code: { type: String, default: null }, 
-      bankDetails: {
-        bankCode: { type: String }, // Paystack bank code (e.g., for M-Pesa)
-        accountNumber: { type: String }, // M-Pesa number or bank account
-        accountName: { type: String }, // Account holder name
-      },
+
+      recipient_code: { type: String, default: null },  // Paystack only; remove post-migration
       mobileMoneyDetails: {
-        provider: { type: String, enum: ['M-Pesa', null], default: "M-Pesa" }, // M-Pesa provider
-        phoneNumber: { type: String }, // M-Pesa phone number (e.g., +2547XXXXXXXX)
-        accountName: { type: String }, // Name associated with M-Pesa account
+        provider: { type: String, enum: ['M-Pesa'], default: 'M-Pesa' },
+        phoneNumber: { type: String,  validate: { validator: (v) => /^\+?254[17]\d{8}$/.test(v), message: 'Invalid Kenyan M-Pesa number' } },
+        accountName: { type: String,},
+        verified: { type: Boolean, default: false }, // Add: Confirm via mini-STK or docs
       },
       isAdmin: {
         type: Boolean,
@@ -90,6 +86,7 @@ const UserSchema = new mongoose.Schema(
       },
       deviceToken: { type: String },
     },
+    
     pushSubscription: { type: Object },
     lastSeen: { type: Date, default: Date.now },
     analytics: {
@@ -169,13 +166,13 @@ const UserSchema = new mongoose.Schema(
     ],
     financials: {
       balance: { type: Number, default: 0 },
+      swiftTransferId: { type: String }, 
       payoutHistory: [
         {
-          amount: { type: Number, required: true },
+          amount: { type: Number},
           date: { type: Date, default: Date.now },
-          method: { type: String, enum: ['M-Pesa', 'Bank'], required: true },
-          paystackTransferCode: { type: String },
-          status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+          method: { type: String, enum: ['M-Pesa', 'Bank'] },
+          status: { type: String, enum: ['pending', 'completed', 'failed',"refunded"], default: 'pending' },
         },
       ],
     },
