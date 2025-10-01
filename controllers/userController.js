@@ -120,7 +120,7 @@ export const getAuthenticatedProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error(`Error fetching authenticated profile: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error fetching authenticated profile: ${error.message}`, { stack: error.stack,});
     return res.status(500).json({ success: false, message: 'Failed to fetch authenticated profile' });
   }
 };
@@ -204,7 +204,7 @@ export const updateUserProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack,});
     return res.status(500).json({ success: false, message: 'Failed to update user profile' });
   }
 };
@@ -361,7 +361,7 @@ export const addToWishlist = async (req, res) => {
     logger.info(`Listing ${listingId} added to wishlist for user ${req.user._id}`);
     return res.status(200).json({ success: true, message: 'Added to wishlist successfully' });
   } catch (error) {
-    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack, userId: req.user?._id, listingId });
+    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack, listingId });
     return res.status(500).json({ success: false, message: 'Failed to add to wishlist' });
   }
 };
@@ -402,7 +402,7 @@ export const removeFromWishlist = async (req, res) => {
     logger.info(`Listing ${listingId} removed from wishlist for user ${req.user._id}`);
     return res.status(200).json({ success: true, message: 'Removed from wishlist successfully' });
   } catch (error) {
-    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack, userId: req.user?._id, listingId });
+    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack, listingId });
     return res.status(500).json({ success: false, message: 'Failed to remove from wishlist' });
   }
 };
@@ -435,7 +435,7 @@ export const getReferralLink = async (req, res) => {
       message: 'Referral link generated successfully',
     });
   } catch (error) {
-    logger.error(`Error fetching referral link: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error fetching referral link: ${error.message}`, { stack: error.stack,});
     return res.status(500).json({ success: false, message: 'Failed to fetch referral link' });
   }
 };
@@ -716,7 +716,7 @@ export const deleteAccount = async (req, res) => {
     console.log(error);
     await session.abortTransaction();
     session.endSession();
-    logger.error(`Error deleting account: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error deleting account: ${error.message}`, { stack: error.stack,});
     return res.status(500).json({ success: false, message: 'Failed to delete account' });
   }
 };

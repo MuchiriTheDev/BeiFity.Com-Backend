@@ -377,14 +377,19 @@ export const retryOrderPayment = async (req, res) => {
     if (!order) {
       logger.warn(`Retry order payment failed: Order ${orderId} not found`, { userId: requesterId, ip: req.ip });
       return res.status(404).json({ success: false, message: 'Order not found' });
-    }
+    }   
     if (order.customerId.toString() !== requesterId) {
       logger.warn(`Retry order payment failed: User ${requesterId} attempted to access order ${orderId} owned by ${order.customerId}`, { ip: req.ip });
       return res.status(403).json({ success: false, message: 'Unauthorized to access this order' });
     }
+    const transaction = await TransactionModel.findOne({orderId: orderId}).session(session);
     if (order.status !== 'pending') {
       logger.warn(`Retry order payment failed: Order ${orderId} is not pending`, { userId: requesterId, ip: req.ip });
       return res.status(400).json({ success: false, message: 'Only pending orders can retry payment' });
+    }
+    if (order.status === 'paid' || transaction.status === 'completed') {
+      logger.warn(`Retry order payment failed: Order ${orderId} is already paid`, { userId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Order is already paid' });
     }
     if (!phone || !/^\+?254[0-9]{9}$/.test(phone)) {
       logger.warn('Retry order payment failed: Invalid phone', { userId: requesterId, ip: req.ip });
@@ -399,6 +404,10 @@ export const retryOrderPayment = async (req, res) => {
       logger.warn('Retry order payment failed: Invalid or missing user email', { userId: requesterId, ip: req.ip });
       return res.status(400).json({ success: false, message: 'Valid user email required for payment' });
     }
+
+
+
+
     const paymentResult = await withRetry(() => initializePayment(order._id, session, user.personalInfo.email, order.deliveryFee, phone), 3, `Initialize payment for order ${order.orderId}`);
     if (paymentResult.error) {
       logger.warn(`Retry order payment failed: Payment initialization failed - ${paymentResult.message}`, { userId: requesterId, orderId: order.orderId });
@@ -1060,7 +1069,7 @@ export const getBuyerOrders = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    logger.error(`Error fetching buyer orders: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error fetching buyer orders: ${error.message}`, { stack: error.stack, });
     return res.status(500).json({ success: false, message: `Server error: ${error.message}` });
   }
 };

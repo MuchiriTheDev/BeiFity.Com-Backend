@@ -108,7 +108,7 @@ export const initializePayment = async (orderId, session, email, deliveryFee) =>
     const swiftPayload = {
       amount: Math.round(order.totalAmount), // Int KES, min 1
       phone_number: buyerPhone,
-      channel_id: process.env.SWIFT_CHANNEL_ID || undefined, // Optional
+      channel_id: "000134" || undefined, // Optional
       account_reference: `ORDER-${orderId}`,
       transaction_desc: `Payment for Order #${order.orderId}`,
       callback_url: `${process.env.DOMAIN}/api/payments/webhook/swift`, // Your webhook endpoint
@@ -548,14 +548,55 @@ export const handleSwiftWebhook = async (req, res) => {
 
     const { transaction_id, external_reference, status, service_fee, result } = input;
 
+    const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
     if (!transaction_id || status !== 'completed' || result.ResultCode !== 0) {
       logger.warn(`Webhook invalid: status=${status}, code=${result.ResultCode}`, { transaction_id });
-      await session.commitTransaction();
+    
+      const order = await orderModel.findOne({orderId : transaction?.orderId}).populate('items.sellerId customerId');
+      if (order) {
+        const buyer = order.customerId;
+        const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful. Please try again or contact support if the issue persists.`;
+        try {
+          await sendNotification( 
+            buyer._id.toString(),
+            'order',
+            buyerNotificationContent, 
+            null
+          );
+          await sendEmail(
+            buyer.personalInfo.email,
+            'Payment Failed - BeiFity.Com',
+            `Dear ${sanitizeHtml(buyer.personalInfo.fullname || 'Customer')},
+            
+            <br><br>Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful.
+              <a href="${FRONTEND_URL}/your-orders?orderId=${order.orderId}">View Details and Try Repayment</a> 
+            .Please try again or contact support if the issue persists.<br><br>Best regards,<br>BeiFity Team`
+          );
+          const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
+          if (admin && admin.personalInfo?.email) {
+            await sendEmail(
+              admin.personalInfo.email,
+              'Order Payment Failed - BeiFity.Com',
+              `Admin,<br><br>The payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) has failed. Please review the order and assist the customer if needed.<br><br>Best regards,<br>BeiFity System`
+            );
+          }
+          logger.info(`Failed payment notification created for buyer ${buyer._id}`, { orderId: order.orderId });
+        } catch (notificationError) {
+          logger.warn(`Failed to create failed payment notification: ${notificationError.message}`, { orderId: order.orderId });
+        }
+
       transactionCommitted = true;
-      return res.status(200).send('OK'); // ACK anyway
+      await session.commitTransaction();
+      return res.status(400).json({ success: false, message: 'Payment not completed' });
+      } else {
+        logger.warn(`Webhook: Order not found for failed transaction ${transaction_id}`);
+        transactionCommitted = true;
+        await session.commitTransaction();
+        return res.status(404).json({ success: false, message: 'Order not found for failed transaction' });
+      }
     }
     console.log('Processing SWIFT webhook for transaction:', external_reference);
-    const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
+   
     if (!transaction) {
       logger.warn(`Webhook: Transaction not found for ${transaction_id}`);
       await session.commitTransaction();
@@ -563,7 +604,7 @@ export const handleSwiftWebhook = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
 
-    const order = await orderModel.findOne({orderId : transaction.orderId}).session(session).populate('items.sellerId customerId');
+
     if (!order) {
       logger.warn(`Webhook: Order not found for transaction ${transaction_id}`);
       await session.commitTransaction();
@@ -574,7 +615,7 @@ export const handleSwiftWebhook = async (req, res) => {
 
     // Update Transaction
     transaction.status = 'completed';
-    transaction.swiftServiceFee = service_fee || (transaction.totalAmount * parseFloat(process.env.SWIFT_FEE_RATE || 0.02));
+    transaction.swiftServiceFee = service_fee || (transaction.totalAmount * parseFloat(process.env.SWIFT_FEE_RATE || 0.00));
     transaction.netReceived = transaction.totalAmount - transaction.swiftServiceFee;
     transaction.paidAt = new Date();
     await transaction.save({ session });

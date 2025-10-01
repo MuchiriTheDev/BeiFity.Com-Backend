@@ -245,7 +245,7 @@ export const addListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding listing: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error adding listing: ${error.message}`, { stack: error.stack});
     res.status(500).json({ success: false, message: 'Failed to add listing' });
   } finally {
     session.endSession();
@@ -305,7 +305,7 @@ export const renewListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error renewing listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error renewing listing: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to renew listing' });
   } finally {
     session.endSession();
@@ -387,7 +387,7 @@ export const markAsSold = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error marking listing as sold: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error marking listing as sold: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to mark listing as sold' });
   } finally {
     session.endSession();
@@ -465,7 +465,7 @@ export const addReview = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding review: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    logger.error(`Error adding review: ${error.message}`, { stack: error.stack,  });
     res.status(500).json({ success: false, message: 'Failed to add review' });
   } finally {
     session.endSession();
@@ -508,7 +508,7 @@ export const recordInquiry = async (req, res) => {
     res.status(200).json({ success: true, message: 'Inquiry recorded successfully' });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error recording inquiry: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error recording inquiry: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to record inquiry' });
   } finally {
     session.endSession();
@@ -575,7 +575,7 @@ export const addToCart = async (req, res) => {
     }
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding to cart: ${error.message}`, { stack: error.stack, productId, userId, guestId });
+    logger.error(`Error adding to cart: ${error.message}`, { stack: error.stack  });
     res.status(500).json({ success: false, message: 'Failed to add to cart' });
   } finally {
     session.endSession();
@@ -631,7 +631,7 @@ export const removeFromWishlist = async (req, res) => {
     logger.warn('Remove from wishlist failed: Both userId and guestId are missing', { productId });
     return res.status(400).json({ success: false, message: 'Both userId and guestId are missing' });
   } catch (error) {
-    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack, productId, userId, guestId });
+    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to remove from wishlist' });
   }
 };
@@ -703,7 +703,7 @@ export const addToWishlist = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Both userId and guestId are missing' });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack, productId, userId, guestId });
+    logger.error(`Error adding to wishlist: ${error.message}`, { stack: error.stack  });
     res.status(500).json({ success: false, message: 'Failed to add to wishlist' });
   } finally {
     session.endSession();
@@ -785,7 +785,7 @@ export const updateInventory = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error updating inventory: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error updating inventory: ${error.message}`, { stack: error.stack});
     res.status(500).json({ success: false, message: 'Failed to update inventory' });
   } finally {
     session.endSession();
@@ -855,7 +855,7 @@ export const markAsUnSold = async (req, res) => {
     res.status(200).json({ success: true, message: 'Listing marked as unsold', data: listing });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error marking listing as unsold: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error marking listing as unsold: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to mark listing as unsold' });
   } finally {
     session.end同一个Session();
@@ -908,7 +908,7 @@ export const promoteListing = async (req, res) => {
     res.status(200).json({ success: true, message: 'Listing promoted successfully', data: listing });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error promoting listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error promoting listing: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to promote listing' });
   } finally {
     session.endSession();
@@ -953,7 +953,7 @@ export const recordNegotiation = async (req, res) => {
     res.status(200).json({ success: true, message: 'Negotiation attempt recorded' });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error recording negotiation: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error recording negotiation: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to record negotiation' });
   } finally {
     session.endSession();
@@ -1011,7 +1011,7 @@ export const transferGuestData = async (req, res) => {
     res.status(200).json({ success: true, message: 'Guest data transferred successfully' });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error transferring guest data: ${error.message}`, { stack: error.stack, userId, guestId });
+    logger.error(`Error transferring guest data: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to transfer guest data' });
   } finally {
     session.endSession();
@@ -1160,7 +1160,7 @@ export const updateListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error updating listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error updating listing: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to update listing' });
   } finally {
     session.endSession();
@@ -1615,7 +1615,7 @@ export const featureListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error featuring listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error featuring listing: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to feature listing' });
   } finally {
     session.endSession();
@@ -1661,7 +1661,7 @@ export const updateResponseTime = async (req, res) => {
     logger.info(`Response time updated for listing ${productId} by admin ${req.user._id}`);
     res.status(200).json({ success: true, message: 'Response time updated', data: listing });
   } catch (error) {
-    logger.error(`Error updating response time: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error updating response time: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to update response time' });
   }
 };
@@ -1699,7 +1699,7 @@ export const updateAcceptanceRate = async (req, res) => {
     logger.info(`Acceptance rate updated for listing ${productId} by admin ${req.user._id}`);
     res.status(200).json({ success: true, message: 'Acceptance rate updated', data: listing });
   } catch (error) {
-    logger.error(`Error updating acceptance rate: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error updating acceptance rate: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to update acceptance rate' });
   }
 };
@@ -1737,7 +1737,7 @@ export const updateConversionRate = async (req, res) => {
     logger.info(`Conversion rate updated for listing ${productId} by admin ${req.user._id}`);
     res.status(200).json({ success: true, message: 'Conversion rate updated', data: listing });
   } catch (error) {
-    logger.error(`Error updating conversion rate: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error updating conversion rate: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to update conversion rate' });
   }
 };
@@ -1907,7 +1907,7 @@ export const verifyListing = async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error verifying listing: ${error.message}`, { stack: error.stack, productId, userId: req.user?._id });
+    logger.error(`Error verifying listing: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to verify listing' });
   } finally {
     session.endSession();
