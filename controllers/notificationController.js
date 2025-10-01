@@ -84,10 +84,19 @@ const getNotificationUrl = (type, sender, notificationId) => {
       return `/chat/${sender}`; // Sender is userId
     case 'order':
     case 'order_status':
+    case "data_transferred":
+    case "listing_sold":
+      return `/listings`; // Sender is orderId
+    case "listing_unsold":
+      return `/listings`;
+    case "listing_viewed":
+      return `/listings`; // Sender is productId
+    case "listing_renewed" :
+      return `/listings`;
     case 'order_cancellation':
       return `/dashboard/orders`;
     case 'new_product':
-      return `/product/${sender}`; // Sender is productId
+      return `/listings`; // Sender is productId
     case 'report':
       return `/dashboard/reports`;
     case 'report_status':
@@ -114,7 +123,10 @@ export const sendNotification = async (userId, type, content, sender, session = 
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid userId');
   }
-  const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status'];
+  const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status', "listing_sold", "listing_unsold", "listing_renewed",
+    "listing_expiring", "listing_expired", "listing_deleted", "listing_sold", "listing_unsold",
+    "listing_viewed", "data_transferred"
+  ];
   if (!type || !validTypes.includes(type)) {
     throw new Error(`Invalid type: must be one of ${validTypes.join(', ')}`);
   }

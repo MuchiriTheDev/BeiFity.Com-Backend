@@ -78,7 +78,7 @@ export const getUserProfile = async (req, res) => {
     logger.info(`User profile fetched for user ${userId}`);
     return res.status(200).json({ success: true, data: user });
   } catch (error) {
-    logger.error(`Error fetching user profile: ${error.message}`, { stack: error.stack, userId });
+    logger.error(`Error fetching user profile: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'Failed to fetch user profile' });
   }
 };
@@ -402,7 +402,7 @@ export const removeFromWishlist = async (req, res) => {
     logger.info(`Listing ${listingId} removed from wishlist for user ${req.user._id}`);
     return res.status(200).json({ success: true, message: 'Removed from wishlist successfully' });
   } catch (error) {
-    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack, listingId });
+    logger.error(`Error removing from wishlist: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'Failed to remove from wishlist' });
   }
 };

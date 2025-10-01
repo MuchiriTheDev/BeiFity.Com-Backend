@@ -386,6 +386,7 @@ export const markAsSold = async (req, res) => {
       data: listing,
     });
   } catch (error) {
+    console.error('Error in markAsSold:', error);
     await session.abortTransaction();
     logger.error(`Error marking listing as sold: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to mark listing as sold' });
@@ -854,6 +855,7 @@ export const markAsUnSold = async (req, res) => {
     logger.info(`Listing ${productId} marked as unsold by user ${userId}`);
     res.status(200).json({ success: true, message: 'Listing marked as unsold', data: listing });
   } catch (error) {
+    console.error('Error in markAsUnSold:', error);
     await session.abortTransaction();
     logger.error(`Error marking listing as unsold: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to mark listing as unsold' });
@@ -1000,7 +1002,7 @@ export const transferGuestData = async (req, res) => {
 
     await sendNotification(
       userId,
-      'guest_data_transferred',
+      'data_transferred',
       `Your guest cart and wishlist data have been transferred to your account.`,
       null,
       session
@@ -1469,6 +1471,12 @@ export const updateViews = async (req, res) => {
 
     await userModel.findByIdAndUpdate(listing.seller.sellerId, { $inc: { 'analytics.listingViews': 1 } });
 
+    await sendNotification(
+      listing.seller.sellerId,
+      'listing_viewed',
+      `Your listing "${listing.productInfo.name}" was viewed.`,
+      viewerId
+    );
     logger.info(`View recorded for listing ${productId} by viewer ${viewerId}`);
     res.status(200).json({ success: true, message: 'View recorded successfully' });
   } catch (error) {
