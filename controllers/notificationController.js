@@ -88,11 +88,18 @@ const getNotificationUrl = (type, sender, notificationId) => {
     case "listing_verified":
       return `/listings`; // Sender is orderId
     case "listing_rejected":
-  
+    case "listing_negotiation":
+    case "admin_listing_rejection":
+    case "admin_listing_verification":
+    case "admin_listing_negotiation":
+    case "listing_inquiry":
+      return `/listings`; // Sender is productId
     case "listing_sold":
       return `/listings`; // Sender is orderId
     case "listing_unsold":
       return `/listings`;
+    case "admin_listing_inquiry":
+      return `/listings`; // Sender is productId
     case "listing_viewed":
       return `/listings`; // Sender is productId
     case "listing_renewed" :
@@ -129,7 +136,8 @@ export const sendNotification = async (userId, type, content, sender, session = 
   }
   const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status', "listing_sold", "listing_unsold", "listing_renewed",
     "listing_expiring", "listing_expired", "listing_deleted", "listing_sold", "listing_unsold",
-    "listing_viewed", "data_transferred", "listing_verified", "listing_rejected"
+    "listing_viewed", "data_transferred", "listing_verified", "listing_rejected", "listing_inquiry", "admin_listing_inquiry","listing_negotiation",
+    "admin_listing_rejection", "admin_listing_verification", "admin_listing_negotiation"
   ];
   if (!type || !validTypes.includes(type)) {
     throw new Error(`Invalid type: must be one of ${validTypes.join(', ')}`);

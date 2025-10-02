@@ -51,6 +51,7 @@ export const addListing = async (req, res) => {
       logger.warn('Add listing failed: Invalid inventory', { userId, inventory });
       return res.status(400).json({ success: false, message: 'Inventory must be a positive number' });
     }
+    const user = await userModel.findById(userId).session(session);
 
     const productId = uuidv4();
     const listingData = {
@@ -229,7 +230,7 @@ export const addListing = async (req, res) => {
         await sendNotification(
           admin._id,
           'admin_pending_listing',
-          `Listing "${listingData.productInfo.name}" by user ${req.user.personalInfo.fullname} was rejected by AI. Findings:\n${findingsSummary}`,
+          `Listing "${listingData.productInfo.name}" by user ${user.personalInfo.fullname} was rejected by AI. Findings:\n${findingsSummary}`,
           req.user._id,
           session
         );
@@ -499,7 +500,7 @@ export const recordInquiry = async (req, res) => {
     await sendNotification(
       listing.seller.sellerId,
       'listing_inquiry',
-      `A new inquiry was made on your listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      `A new inquiry was made on your listing "${listing.productInfo.name}" by ${user.personalInfo.fullname}.`,
       userId,
       session
     );
@@ -511,7 +512,7 @@ export const recordInquiry = async (req, res) => {
     await sendEmail(
       listing.seller.sellerId.personalInfo.email,
       'New Listing Inquiry',
-      `You have a new inquiry for your listing "${listing.productInfo.name}" from ${req.user.personalInfo.fullname}. Please respond promptly.`
+      `You have a new inquiry for your listing "${listing.productInfo.name}" from ${user.personalInfo.fullname}. Please respond promptly.`
     );
 
     await userModel.findByIdAndUpdate(
@@ -525,7 +526,7 @@ export const recordInquiry = async (req, res) => {
     await sendNotification(
       admin._id,
       'admin_listing_inquiry',
-      `A new inquiry was made on listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      `A new inquiry was made on listing "${listing.productInfo.name}" by ${user.personalInfo.fullname}.`,
       userId,
       session
     );
@@ -974,7 +975,7 @@ export const recordNegotiation = async (req, res) => {
     await sendNotification(
       listing.seller.sellerId,
       'listing_negotiation',
-      `A negotiation attempt was made on your listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      `A negotiation attempt was made on your listing "${listing.productInfo.name}" by ${user.personalInfo.fullname}.`,
       userId,
       session
     );
@@ -987,7 +988,7 @@ export const recordNegotiation = async (req, res) => {
     await sendEmail(
       listing.seller.sellerId.personalInfo.email,
       'New Negotiation Attempt',
-      `You have a new negotiation attempt for your listing "${listing.productInfo.name}" from ${req.user.personalInfo.fullname}. Please respond promptly.`
+      `You have a new negotiation attempt for your listing "${listing.productInfo.name}" from ${user.personalInfo.fullname}. Please respond promptly.`
     );
 
     await userModel.findByIdAndUpdate(
@@ -1001,7 +1002,7 @@ export const recordNegotiation = async (req, res) => {
     await sendNotification(
       admin._id,
       'admin_listing_negotiation',
-      `A negotiation attempt was made on listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      `A negotiation attempt was made on listing "${listing.productInfo.name}" by ${user.personalInfo.fullname}.`,
       userId,
       session
     );
