@@ -12,6 +12,7 @@ import env from '../config/env.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { orderModel } from '../models/Order.js';
 import { sendNotification } from './notificationController.js';
+import { generateProductRequestEmail } from '../utils/Templates.js';
 
 // Add Listing
 export const addListing = async (req, res) => {
@@ -1023,27 +1024,68 @@ export const recordNegotiation = async (req, res) => {
 export const askForAProduct = async (req, res) => {
   try {
     const { name, phone, productDetails } = req.body;
+
+    // Validate required fields
     if (!name || !phone || !productDetails) {
       logger.warn('Ask for a product failed: Name, phone, and product details are required');
       return res.status(400).json({ success: false, message: 'Name, phone, and product details are required' });
     }
+
+    // Validate phone number (9-15 digits)
+    // if (!/^\d{9,15}$/.test(phone)) {
+    //   logger.warn('Ask for a product failed: Invalid phone number');
+    //   return res.status(400).json({ success: false, message: 'Phone number must be 9-15 digits' });
+    // }
+
+    // Validate productDetails structure
+    const { productName, description = '', preferredPriceRange, colors = [], condition, additionalNotes = '' } = productDetails;
+    if (!productName || !preferredPriceRange || isNaN(Number(preferredPriceRange))) {
+      logger.warn('Ask for a product failed: Invalid product details');
+      return res.status(400).json({ success: false, message: 'Product name and valid price range are required' });
+    }
+
+    // Validate condition
+    const validConditions = ['New', 'Refurbished', 'Lightly Used', 'Used'];
+    if (!validConditions.includes(condition)) {
+      logger.warn('Ask for a product failed: Invalid condition');
+      return res.status(400).json({ success: false, message: 'Invalid condition specified' });
+    }
+
+    // Find admin user
     const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
     if (!admin) {
       logger.error('Ask for a product failed: No admin user found');
       return res.status(500).json({ success: false, message: 'No admin user found' });
-    } 
+    }
+
+    // Generate HTML email using the new template
+    const emailContent = generateProductRequestEmail(
+      name,
+      phone,
+      productName,
+      description,
+      preferredPriceRange,
+      colors,
+      condition,
+      additionalNotes
+    );
+
+    // Send email to admin
     await sendEmail(
       admin.personalInfo.email,
-      'New Product Request',
-      `A new product request has been made by ${name} (${phone}).\n\nProduct Details:\n${productDetails}`
+      'New Product Request - BeiFity.Com',
+      emailContent
     );
-    logger.info(`Product request sent by ${name} (${phone})`);
+
+    logger.info(`Product request sent by ${name} (${phone}) for product: ${productName}`);
     res.status(200).json({ success: true, message: 'Product request sent successfully' });
   } catch (error) {
     logger.error(`Error in ask for a product: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to send product request' });
-  } 
+  }
 };
+
+
 
 // Transfer Guest Data
 export const transferGuestData = async (req, res) => {

@@ -1134,3 +1134,108 @@ export const generateMarketingAdminReportEmail = (products, recipients) => {
     </html>
   `;
 };
+
+
+// Add to templates.js
+export const generateProductRequestEmail = (
+  name,
+  phone,
+  productName,
+  description,
+  preferredPriceRange,
+  colors,
+  condition,
+  additionalNotes
+) => {
+  const sanitizedName = sanitizeHtml(name, sanitizeConfig);
+  const sanitizedPhone = sanitizeHtml(phone, sanitizeConfig);
+  const sanitizedProductName = sanitizeHtml(capitalizeWords(productName), sanitizeConfig);
+  const sanitizedDescription = sanitizeHtml(description || 'Not provided', sanitizeConfig);
+  const sanitizedPreferredPriceRange = sanitizeHtml(Number(preferredPriceRange).toFixed(2), sanitizeConfig);
+  const sanitizedColors = colors.length > 0
+    ? colors.map(color => sanitizeHtml(color, sanitizeConfig)).join(', ')
+    : sanitizeHtml('Not specified', sanitizeConfig);
+  const sanitizedCondition = sanitizeHtml(condition, sanitizeConfig);
+  const sanitizedAdditionalNotes = sanitizeHtml(additionalNotes || 'Not provided', sanitizeConfig);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Product Request - BeiFity.Com</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New Product Request Received!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">A User Has Requested a Product</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    A new product request has been submitted on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>. Please review the details below and take appropriate action.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Request Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Requested By:</strong> ${sanitizedName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Phone Number:</strong> ${sanitizedPhone}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product Name:</strong> ${sanitizedProductName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Description:</strong> ${sanitizedDescription}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Preferred Price Range:</strong> KES ${sanitizedPreferredPriceRange}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Preferred Colors:</strong> ${sanitizedColors}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Condition:</strong> ${sanitizedCondition}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Additional Notes:</strong> ${sanitizedAdditionalNotes}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/admin/requests" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                    View Product Requests
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> Review the request in the admin dashboard and contact the user if necessary to discuss availability or sourcing options.
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Manage your platform on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 700; font-size: 14px;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};
