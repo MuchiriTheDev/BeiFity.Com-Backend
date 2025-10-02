@@ -28,6 +28,8 @@ import {
   updateAllListings,
   renewListing,
   checkInventory,
+  askForAProduct,
+  recordNegotiation,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -37,6 +39,7 @@ const listingRouter = express.Router();
 listingRouter.get('/', getListings);
 listingRouter.get('/byproductId/:productId', getListingById);
 listingRouter.post('/:productId/views', updateViews);
+listingRouter.post('/ask-for-product', askForAProduct); // Authenticated users can ask questions about a product
 listingRouter.post('/:productId/share', shareListing);
 listingRouter.get('/sellerslistings/:sellerId', getSellerListings);
 listingRouter.get('/featured', getFeaturedListings);
@@ -59,6 +62,8 @@ listingRouter.put('/product/:productId/unsold', authUser, markAsUnSold);
 listingRouter.put('/:productId/promote', authUser, promoteListing);
 listingRouter.put('/:productId/inventory', authUser, updateInventory);
 listingRouter.patch('/:productId/renew', authUser, renewListing);
+listingRouter.post('/:productId/negotiate', authUser, recordNegotiation);
+listingRouter.post('/:productId/inquire', authUser, recordNegotiation);
 
 // Admin Routes
 listingRouter.get('/admin/pending', authUser, getPendingListings);
