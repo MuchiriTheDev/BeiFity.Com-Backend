@@ -85,6 +85,10 @@ const getNotificationUrl = (type, sender, notificationId) => {
     case 'order':
     case 'order_status':
     case "data_transferred":
+    case "listing_verified":
+      return `/listings`; // Sender is orderId
+    case "listing_rejected":
+  
     case "listing_sold":
       return `/listings`; // Sender is orderId
     case "listing_unsold":
@@ -125,7 +129,7 @@ export const sendNotification = async (userId, type, content, sender, session = 
   }
   const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status', "listing_sold", "listing_unsold", "listing_renewed",
     "listing_expiring", "listing_expired", "listing_deleted", "listing_sold", "listing_unsold",
-    "listing_viewed", "data_transferred"
+    "listing_viewed", "data_transferred", "listing_verified", "listing_rejected"
   ];
   if (!type || !validTypes.includes(type)) {
     throw new Error(`Invalid type: must be one of ${validTypes.join(', ')}`);
