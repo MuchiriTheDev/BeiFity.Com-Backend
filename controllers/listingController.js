@@ -1913,7 +1913,7 @@ export const getPendingListings = async (req, res) => {
     }
 
     const listings = await listingModel
-      .find({ verified: 'Pending' })
+      .find({ verified: 'Rejected' })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
     logger.info(`Fetched ${listings.length} pending listings by admin ${req.user._id}`);
@@ -1923,6 +1923,46 @@ export const getPendingListings = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch pending listings' });
   }
 };
+
+export const approveListing = async (req, res) => {
+  try {
+    if (!req.user) {
+      logger.warn('Approve listing failed: No user data in request');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    const adminId = req.user._id.toString();
+    const admin = await userModel.findById(adminId);
+    if (!admin || !admin.personalInfo?.isAdmin) {
+      logger.warn(`Approve listing failed: User ${adminId} not admin`);
+      return res.status(403).json({ success: false, message: 'Admin access required' });
+    }
+    const { productId } = req.params;
+    const listing = await listingModel.findOne({ 'productInfo.productId': productId });
+    if (!listing) {
+      logger.warn(`Approve listing failed: Listing ${productId} not found`);
+      return res.status(404).json({ success: false, message: 'Listing not found' });
+    }
+    listing.verified = 'Verified';
+    await listing.save();
+    await sendNotification(
+      listing.seller.sellerId,
+      'listing_verified',
+      `Your listing "${listing.productInfo.name}" has been verified by an admin and is now live!`,
+      adminId
+    );
+
+    logger.info(`Listing ${productId} approved by admin ${adminId}`);
+    res.status(200).json({
+      success: true,
+      message: 'Listing approved successfully',
+      data: listing,
+    });
+  } catch (error) {
+    logger.error(`Error approving listing: ${error.message}`, { stack: error.stack });
+    res.status(500).json({ success: false, message: 'Failed to approve listing' });
+  }
+
+}
 
 // Get Featured Listings
 export const getFeaturedListings = async (req, res) => {

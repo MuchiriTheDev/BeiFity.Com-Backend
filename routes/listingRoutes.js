@@ -30,6 +30,7 @@ import {
   checkInventory,
   askForAProduct,
   recordNegotiation,
+  approveListing,
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -67,6 +68,7 @@ listingRouter.post('/:productId/inquire', authUser, recordNegotiation);
 
 // Admin Routes
 listingRouter.get('/admin/pending', authUser, getPendingListings);
+listingRouter.put('/admin/:productId/approve', authUser, approveListing);
 listingRouter.put('/admin/:productId/response-time', authUser, updateResponseTime);
 listingRouter.put('/admin/:productId/acceptance-rate', authUser, updateAcceptanceRate);
 listingRouter.put('/admin/:productId/conversion-rate', authUser, updateConversionRate);
