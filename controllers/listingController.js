@@ -95,7 +95,7 @@ export const addListing = async (req, res) => {
 
     // Initialize Google Gemini
     const genAI = new GoogleGenerativeAI("AIzaSyAX6iMtJTSEL9P4Ea33ExcehmMmu6R4LHM");
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Prepare prompt for AI verification and findings
     const prompt = `
