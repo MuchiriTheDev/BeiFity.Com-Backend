@@ -131,15 +131,8 @@ const getNotificationUrl = (type, sender, notificationId) => {
  */
 export const sendNotification = async (userId, type, content, sender, session = null) => {
   // Validate inputs with minimal strictness to reduce errors
-  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-    throw new Error('Invalid userId');
-  }
-  const validTypes = ['message', 'order', 'new_product', 'report', 'report_status', 'order_cancellation', 'order_status', "listing_sold", "listing_unsold", "listing_renewed",
-    "listing_expiring", "listing_expired", "listing_deleted", "listing_sold", "listing_unsold",
-    "listing_viewed", "data_transferred", "listing_verified", "listing_rejected", "listing_inquiry", "admin_listing_inquiry","listing_negotiation",
-    "admin_listing_rejection", "admin_listing_verification", "admin_listing_negotiation"
-  ];
-  if (!type || !validTypes.includes(type)) {
+  
+  if (!type) {
     throw new Error(`Invalid type: must be one of ${validTypes.join(', ')}`);
   }
   if (!content || typeof content !== 'string') {
