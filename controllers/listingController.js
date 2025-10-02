@@ -94,8 +94,8 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI("AIzaSyBWq3sDh4cvy9Wupo2ASBPhrCCk41WGlpM");
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const genAI = new GoogleGenerativeAI("AIzaSyAX6iMtJTSEL9P4Ea33ExcehmMmu6R4LHM");
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     // Prepare prompt for AI verification and findings
     const prompt = `
@@ -503,6 +503,35 @@ export const recordInquiry = async (req, res) => {
       userId,
       session
     );
+    await sendEmail(
+      req.user.personalInfo.email,
+      'Inquiry Recorded',
+      `Your inquiry for the listing "${listing.productInfo.name}" has been recorded. The seller will get back to you soon.`
+    );
+    await sendEmail(
+      listing.seller.sellerId.personalInfo.email,
+      'New Listing Inquiry',
+      `You have a new inquiry for your listing "${listing.productInfo.name}" from ${req.user.personalInfo.fullname}. Please respond promptly.`
+    );
+
+    await userModel.findByIdAndUpdate(
+      listing.seller.sellerId,
+      { $inc: { 'analytics.inquiries': 1 } },
+      { session }
+    );
+
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+
+    await sendNotification(
+      admin._id,
+      'admin_listing_inquiry',
+      `A new inquiry was made on listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      userId,
+      session
+    );
+
+
+    console.log('Inquiry notification sent to admin:', admin._id);
 
     await session.commitTransaction();
     logger.info(`Inquiry recorded for listing ${productId} by user ${userId}`);
@@ -950,6 +979,34 @@ export const recordNegotiation = async (req, res) => {
       session
     );
 
+    await sendEmail(
+      req.user.personalInfo.email,
+      'Negotiation Recorded',
+      `Your negotiation attempt for the listing "${listing.productInfo.name}" has been recorded. The seller will get back to you soon.`
+    );
+    await sendEmail(
+      listing.seller.sellerId.personalInfo.email,
+      'New Negotiation Attempt',
+      `You have a new negotiation attempt for your listing "${listing.productInfo.name}" from ${req.user.personalInfo.fullname}. Please respond promptly.`
+    );
+
+    await userModel.findByIdAndUpdate(
+      listing.seller.sellerId,
+      { $inc: { 'analytics.negotiationAttempts': 1 } },
+      { session }
+    );
+
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+
+    await sendNotification(
+      admin._id,
+      'admin_listing_negotiation',
+      `A negotiation attempt was made on listing "${listing.productInfo.name}" by ${req.user.personalInfo.fullname}.`,
+      userId,
+      session
+    );
+
+
     await session.commitTransaction();
     logger.info(`Negotiation attempt recorded for listing ${productId} by user ${userId}`);
     res.status(200).json({ success: true, message: 'Negotiation attempt recorded' });
@@ -960,6 +1017,31 @@ export const recordNegotiation = async (req, res) => {
   } finally {
     session.endSession();
   }
+};
+
+export const askForAProduct = async (req, res) => {
+  try {
+    const { name, phone, productDetails } = req.body;
+    if (!name || !phone || !productDetails) {
+      logger.warn('Ask for a product failed: Name, phone, and product details are required');
+      return res.status(400).json({ success: false, message: 'Name, phone, and product details are required' });
+    }
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
+    if (!admin) {
+      logger.error('Ask for a product failed: No admin user found');
+      return res.status(500).json({ success: false, message: 'No admin user found' });
+    } 
+    await sendEmail(
+      admin.personalInfo.email,
+      'New Product Request',
+      `A new product request has been made by ${name} (${phone}).\n\nProduct Details:\n${productDetails}`
+    );
+    logger.info(`Product request sent by ${name} (${phone})`);
+    res.status(200).json({ success: true, message: 'Product request sent successfully' });
+  } catch (error) {
+    logger.error(`Error in ask for a product: ${error.message}`, { stack: error.stack });
+    res.status(500).json({ success: false, message: 'Failed to send product request' });
+  } 
 };
 
 // Transfer Guest Data
