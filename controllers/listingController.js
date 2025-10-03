@@ -1668,7 +1668,7 @@ export const updateViews = async (req, res) => {
       listing.seller.sellerId,
       'listing_viewed',
       `Your listing "${listing.productInfo.name}" was viewed.`,
-      viewerId
+      null
     );
     logger.info(`View recorded for listing ${productId} by viewer ${viewerId}`);
     res.status(200).json({ success: true, message: 'View recorded successfully' });
