@@ -37,3 +37,12 @@ export const generateRandomNumbers = () => {
   }
   return numbers;
 };
+
+
+export function createSlug(text) {
+  return text
+    .toLowerCase() // Convert to lowercase
+    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters (e.g., colons)
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-'); // Replace multiple hyphens with a single hyphen
+}

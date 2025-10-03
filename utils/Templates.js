@@ -1,5 +1,6 @@
 // templates.js
 import sanitizeHtml from 'sanitize-html';
+import { createSlug } from './helper.js';
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
 // Sanitize-html configuration
@@ -1305,7 +1306,7 @@ export const generateNegotiationEmailBuyer = (buyerName, listingName, sellerName
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                  <a href="${FRONTEND_URL}/product/${createSlug(listingName)}/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
                     View Product Again
                   </a>
                 </td>
@@ -1399,7 +1400,7 @@ export const generateNegotiationEmailSeller = (sellerName, listingName, buyerNam
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                  <a href="${FRONTEND_URL}/product/${createSlug(listingName)}/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
                     View Your Listing
                   </a>
                 </td>
@@ -1492,7 +1493,7 @@ export const generateInquiryEmailBuyer = (buyerName, listingName, sellerName, se
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                  <a href="${FRONTEND_URL}/product/${createSlug(listingName)}/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
                     View Product Details
                   </a>
                 </td>
@@ -1586,7 +1587,7 @@ export const generateInquiryEmailSeller = (sellerName, listingName, buyerName, b
               </tr>
               <tr>
                 <td>
-                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                  <a href="${FRONTEND_URL}/product/${createSlug(listingName)}/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
                     View Your Listing
                   </a>
                 </td>
