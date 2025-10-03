@@ -1239,3 +1239,379 @@ export const generateProductRequestEmail = (
     </html>
   `;
 };
+
+
+// HTML Email Template Function for Buyer Negotiation (with seller phone number)
+export const generateNegotiationEmailBuyer = (buyerName, listingName, sellerName, sellerPhone, productId) => {
+  const sanitizedBuyerName = sanitizeHtml(buyerName, sanitizeConfig);
+  const sanitizedListingName = sanitizeHtml(capitalizeWords(listingName), sanitizeConfig);
+  const sanitizedSellerName = sanitizeHtml(sellerName, sanitizeConfig);
+  const sanitizedSellerPhone = sanitizeHtml(sellerPhone, sanitizeConfig);
+  const sanitizedProductId = sanitizeHtml(productId, sanitizeConfig);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Negotiation Recorded - BeiFity.Com</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Negotiation Recorded, ${sanitizedBuyerName}!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Negotiation Attempt Has Been Recorded</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    Hi ${sanitizedBuyerName}, we're excited to let you know that your negotiation attempt for "<strong>${sanitizedListingName}</strong>" has been successfully recorded on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Negotiation Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product:</strong> ${sanitizedListingName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Seller Name:</strong> ${sanitizedSellerName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Seller Phone:</strong> ${sanitizedSellerPhone}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product ID:</strong> ${sanitizedProductId}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Contact the Seller:</strong> You can now reach out to ${sanitizedSellerName} directly at <strong>${sanitizedSellerPhone}</strong> to discuss the negotiation further.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                    View Product Again
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> The seller has been notified and will get back to you soon. Feel free to contact them directly using the phone number provided above.
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Visit your buyer dashboard or contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Happy negotiating on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 700; font-size: 14px;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};
+
+// HTML Email Template Function for Seller Negotiation (unchanged but included for completeness)
+export const generateNegotiationEmailSeller = (sellerName, listingName, buyerName, buyerPhone, productId) => {
+  const sanitizedSellerName = sanitizeHtml(sellerName, sanitizeConfig);
+  const sanitizedListingName = sanitizeHtml(capitalizeWords(listingName), sanitizeConfig);
+  const sanitizedBuyerName = sanitizeHtml(buyerName, sanitizeConfig);
+  const sanitizedBuyerPhone = sanitizeHtml(buyerPhone, sanitizeConfig);
+  const sanitizedProductId = sanitizeHtml(productId, sanitizeConfig);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Negotiation Attempt - BeiFity.Com</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New Negotiation Attempt, ${sanitizedSellerName}!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">A Buyer Wants to Negotiate Your Listing</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    Hi ${sanitizedSellerName}, great news! A potential buyer has expressed interest in negotiating the price of your listing "<strong>${sanitizedListingName}</strong>" on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Negotiation Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product:</strong> ${sanitizedListingName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Buyer Name:</strong> ${sanitizedBuyerName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Buyer Phone:</strong> ${sanitizedBuyerPhone}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product ID:</strong> ${sanitizedProductId}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Contact the Buyer:</strong> You can reach out to ${sanitizedBuyerName} directly at <strong>${sanitizedBuyerPhone}</strong> to discuss the negotiation.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                    View Your Listing
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> Please respond to the buyer promptly to discuss the negotiation. Quick responses increase your chances of making a sale!
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Visit your seller dashboard or contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Keep selling on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 700; font-size: 14px;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};
+// HTML Email Template Function for Buyer Inquiry (with seller phone number)
+export const generateInquiryEmailBuyer = (buyerName, listingName, sellerName, sellerPhone, productId) => {
+  const sanitizedBuyerName = sanitizeHtml(buyerName, sanitizeConfig);
+  const sanitizedListingName = sanitizeHtml(capitalizeWords(listingName), sanitizeConfig);
+  const sanitizedSellerName = sanitizeHtml(sellerName, sanitizeConfig);
+  const sanitizedSellerPhone = sanitizeHtml(sellerPhone, sanitizeConfig);
+  const sanitizedProductId = sanitizeHtml(productId, sanitizeConfig);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Inquiry Recorded - BeiFity.Com</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">Inquiry Recorded, ${sanitizedBuyerName}!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">Your Product Inquiry Has Been Recorded</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    Hi ${sanitizedBuyerName}, we're excited to let you know that your inquiry for "<strong>${sanitizedListingName}</strong>" has been successfully recorded on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Inquiry Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product:</strong> ${sanitizedListingName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Seller Name:</strong> ${sanitizedSellerName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Seller Phone:</strong> ${sanitizedSellerPhone}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product ID:</strong> ${sanitizedProductId}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Inquiry Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Contact the Seller:</strong> You can now reach out to ${sanitizedSellerName} directly at <strong>${sanitizedSellerPhone}</strong> to discuss the product further and get more information.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                    View Product Details
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> The seller has been notified of your interest and will get back to you soon. Feel free to contact them directly using the phone number provided above for quicker response.
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Visit your buyer dashboard or contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Happy shopping on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 700; font-size: 14px;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};
+
+// HTML Email Template Function for Seller Inquiry (with buyer phone number)
+export const generateInquiryEmailSeller = (sellerName, listingName, buyerName, buyerPhone, productId) => {
+  const sanitizedSellerName = sanitizeHtml(sellerName, sanitizeConfig);
+  const sanitizedListingName = sanitizeHtml(capitalizeWords(listingName), sanitizeConfig);
+  const sanitizedBuyerName = sanitizeHtml(buyerName, sanitizeConfig);
+  const sanitizedBuyerPhone = sanitizeHtml(buyerPhone, sanitizeConfig);
+  const sanitizedProductId = sanitizeHtml(productId, sanitizeConfig);
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Product Inquiry - BeiFity.Com</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 20px; background-color: #ffffff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); text-align: center;">
+              <tr>
+                <td>
+                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 70px; margin-bottom: 30px; display: block; margin-left: auto; margin-right: auto;">
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <h2 style="font-size: 20px; font-weight: 700; color: #1e40af; margin-bottom: 20px;">New Product Inquiry, ${sanitizedSellerName}!</h2>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 25px;">A Buyer is Interested in Your Listing</p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
+                    Hi ${sanitizedSellerName}, great news! A potential buyer has shown interest in your listing "<strong>${sanitizedListingName}</strong>" on <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="background-color: #f0f4f8; padding: 20px; border-radius: 8px; text-align: left; margin-bottom: 30px;">
+                    <p style="font-size: 14px; color: #1e40af; font-weight: 600; margin: 0 0 10px;">Inquiry Details</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product:</strong> ${sanitizedListingName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Buyer Name:</strong> ${sanitizedBuyerName}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Buyer Phone:</strong> ${sanitizedBuyerPhone}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0 0 8px;"><strong>Product ID:</strong> ${sanitizedProductId}</p>
+                    <p style="font-size: 13px; color: #475569; margin: 0;"><strong>Inquiry Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}</p>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Contact the Buyer:</strong> You can reach out to ${sanitizedBuyerName} directly at <strong>${sanitizedBuyerPhone}</strong> to answer their questions and discuss the product further.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${FRONTEND_URL}/product/${sanitizedProductId}" style="display: inline-block; background-color: #1e40af; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 25px; text-decoration: none; border-radius: 6px; margin-bottom: 30px;">
+                    View Your Listing
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Next Steps:</strong> Please respond to the buyer promptly to answer their questions. Quick responses increase your chances of making a sale!
+                  </p>
+                  <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 20px;">
+                    <strong>Need Assistance?</strong> Visit your seller dashboard or contact our support team at <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="margin-top: 30px;">
+                  <p style="font-size: 14px; color: #64748b; margin: 0;">Keep selling on BeiFity!</p>
+                  <span style="color: #1e40af; font-weight: 700; font-size: 14px;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+};

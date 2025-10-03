@@ -12,7 +12,7 @@ import env from '../config/env.js';
 import { v2 as cloudinary } from 'cloudinary';
 import { orderModel } from '../models/Order.js';
 import { sendNotification } from './notificationController.js';
-import { generateProductRequestEmail } from '../utils/Templates.js';
+import { generateInquiryEmailBuyer, generateInquiryEmailSeller, generateNegotiationEmailBuyer, generateNegotiationEmailSeller, generateProductRequestEmail } from '../utils/Templates.js';
 
 // Add Listing
 export const addListing = async (req, res) => {
@@ -474,7 +474,6 @@ export const addReview = async (req, res) => {
     session.endSession();
   }
 };
-
 // Record Inquiry
 export const recordInquiry = async (req, res) => {
   const session = await mongoose.startSession();
@@ -488,10 +487,28 @@ export const recordInquiry = async (req, res) => {
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
+    // Get buyer details
+    const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      logger.warn(`Record inquiry failed: User ${userId} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing || listing.verified !== 'Verified' || listing.isSold) {
       logger.warn(`Record inquiry failed: Listing ${productId} not found, not verified, or sold`);
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
+    }
+
+    // Get seller details
+    const seller = await userModel.findById(listing.seller.sellerId).session(session);
+    if (userId === listing.seller.sellerId.toString()) {
+      logger.warn(`Record inquiry failed: User ${userId} attempted to inquire own listing`, { productId });
+      return res.status(403).json({ success: false, message: 'Sellers cannot inquire about their own products' });
+    }
+    if (!seller) {
+      logger.warn(`Record inquiry failed: Seller ${listing.seller.sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'Seller not found' });
     }
 
     listing.analytics.inquiries = (listing.analytics.inquiries || 0) + 1;
@@ -505,15 +522,31 @@ export const recordInquiry = async (req, res) => {
       userId,
       session
     );
+
+    // Send email to BUYER with seller's phone number
     await sendEmail(
-      req.user.personalInfo.email,
-      'Inquiry Recorded',
-      `Your inquiry for the listing "${listing.productInfo.name}" has been recorded. The seller will get back to you soon.`
+      user.personalInfo.email,
+      'Inquiry Recorded - Contact Seller',
+      generateInquiryEmailBuyer(
+        user.personalInfo.fullname,
+        listing.productInfo.name,
+        seller.personalInfo.fullname,
+        seller.personalInfo.phone,
+        productId
+      )
     );
+
+    // Send email to SELLER with buyer's phone number
     await sendEmail(
-      listing.seller.sellerId.personalInfo.email,
-      'New Listing Inquiry',
-      `You have a new inquiry for your listing "${listing.productInfo.name}" from ${user.personalInfo.fullname}. Please respond promptly.`
+      seller.personalInfo.email,
+      'New Listing Inquiry - Contact Buyer',
+      generateInquiryEmailSeller(
+        seller.personalInfo.fullname,
+        listing.productInfo.name,
+        user.personalInfo.fullname,
+        user.personalInfo.phone,
+        productId
+      )
     );
 
     await userModel.findByIdAndUpdate(
@@ -532,20 +565,18 @@ export const recordInquiry = async (req, res) => {
       session
     );
 
-
     console.log('Inquiry notification sent to admin:', admin._id);
 
     await session.commitTransaction();
     logger.info(`Inquiry recorded for listing ${productId} by user ${userId}`);
     res.status(200).json({ success: true, message: 'Inquiry recorded successfully' });
   } catch (error) {
-    await session.abortTransaction();
     logger.error(`Error recording inquiry: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Failed to record inquiry' });
+    return res.status(500).json({ success: false, message: 'Failed to record inquiry' });
   } finally {
     session.endSession();
   }
-};
+}
 
 // Add to Cart (Analytics Tracking)
 export const addToCart = async (req, res) => {
@@ -960,6 +991,17 @@ export const recordNegotiation = async (req, res) => {
     const { productId } = req.params;
     const userId = req.user._id.toString();
 
+    const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      logger.warn(`Record negotiation failed: User ${userId} not found`);
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (!user.personalInfo.phone) {
+      logger.warn(`Record negotiation failed: User ${userId} has no phone number`);
+      return res.status(400).json({ success: false, message: 'Please add a phone number to your profile before negotiating' });
+    }
+
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing || listing.verified !== 'Verified' || listing.isSold) {
       logger.warn(`Record negotiation failed: Listing ${productId} not found, not verified, or sold`);
@@ -968,6 +1010,18 @@ export const recordNegotiation = async (req, res) => {
     if (!listing.negotiable) {
       logger.warn(`Record negotiation failed: Listing ${productId} is not negotiable`);
       return res.status(400).json({ success: false, message: 'This listing is not negotiable' });
+    }
+
+    // Get seller details
+    const seller = await userModel.findById(listing.seller.sellerId).session(session);
+    if (!seller) {
+      logger.warn(`Record negotiation failed: Seller ${listing.seller.sellerId} not found`);
+      return res.status(404).json({ success: false, message: 'Seller not found' });
+    }
+
+    if (userId === listing.seller.sellerId.toString()) {
+      logger.warn(`Record negotiation failed: User ${userId} attempted to negotiate own listing`, { productId });
+      return res.status(403).json({ success: false, message: 'Sellers cannot negotiate their own products' });
     }
 
     listing.analytics.negotiationAttempts = (listing.analytics.negotiationAttempts || 0) + 1;
@@ -981,15 +1035,30 @@ export const recordNegotiation = async (req, res) => {
       session
     );
 
+    // Send email to BUYER with seller's phone number
     await sendEmail(
-      req.user.personalInfo.email,
-      'Negotiation Recorded',
-      `Your negotiation attempt for the listing "${listing.productInfo.name}" has been recorded. The seller will get back to you soon.`
+      user.personalInfo.email,
+      'Negotiation Recorded - Contact Seller',
+      generateNegotiationEmailBuyer(
+        user.personalInfo.fullname,
+        listing.productInfo.name,
+        seller.personalInfo.fullname,
+        seller.personalInfo.phone,
+        productId
+      )
     );
+
+    // Send email to SELLER with buyer's phone number
     await sendEmail(
-      listing.seller.sellerId.personalInfo.email,
-      'New Negotiation Attempt',
-      `You have a new negotiation attempt for your listing "${listing.productInfo.name}" from ${user.personalInfo.fullname}. Please respond promptly.`
+      seller.personalInfo.email,
+      'New Negotiation Attempt - Contact Buyer',
+      generateNegotiationEmailSeller(
+        seller.personalInfo.fullname,
+        listing.productInfo.name,
+        user.personalInfo.fullname,
+        user.personalInfo.phone,
+        productId
+      )
     );
 
     await userModel.findByIdAndUpdate(
@@ -1007,7 +1076,6 @@ export const recordNegotiation = async (req, res) => {
       userId,
       session
     );
-
 
     await session.commitTransaction();
     logger.info(`Negotiation attempt recorded for listing ${productId} by user ${userId}`);
