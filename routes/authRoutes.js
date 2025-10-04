@@ -15,6 +15,7 @@ import {
   sendVerificationReminders,
   sendVerificationReminderToOne,
   getUnverified,
+  resendVerification,
 } from '../controllers/authController.js';
 import passport from 'passport';
 import { authUser } from '../middlewares/authMiddleware.js';
@@ -26,6 +27,7 @@ const authRouter = express.Router();
 authRouter.post('/signup', signup);
 authRouter.get('/verify/:id/:token', verification);
 authRouter.post('/login', login);
+authRouter.post('/resend-verification', resendVerification);
 authRouter.post('/reset', getEmailReset);
 authRouter.post('/reset/verify', codeVerification);
 authRouter.post('/reset/change', passwordChange);

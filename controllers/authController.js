@@ -907,3 +907,57 @@ export const getUnverified = async (req, res) => {
     return res.status(500).json({ success: false, message: 'An error occurred while fetching unverified users. Please try again later.' });
   }
 }
+
+export const resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      logger.warn('Resend verification failed: Email missing');
+      return res.status(400).json({ success: false, message: 'Please provide an email address' });
+    }
+    const user = await userModel.findOne({ 'personalInfo.email': email });
+    if (!user) {
+      logger.warn(`Resend verification failed: Email ${email} not found`);
+      return res.status(404).json({ success: false, message: 'No account found with this email' });
+    }
+
+    if (user.personalInfo.verified) {
+      logger.info(`Resend verification skipped: User ${user._id} already verified`);
+      return res.status(200).json({ success: true, message: 'Email is already verified. You can log in.' });
+    }
+    let verificationToken = await tokenModel.findOne({ userId: user._id });
+    if (!verificationToken) {
+      verificationToken = new tokenModel({
+        userId: user._id,
+        token: crypto.randomBytes(32).toString('hex'),
+      });
+      await verificationToken.save();
+      logger.debug(`Verification token created for user: ${user._id}`);
+    }
+    const verificationUrl = `${env.FRONTEND_URL}/users/verify/${user._id}/${verificationToken.token}`;
+    const emailSent = await sendEmail(
+      user.personalInfo.email,
+      'Verify Your Email At BeiFity.Com',
+      createEmailTemplate(
+        'Verify Your Email Address',
+        `Hello ${user.personalInfo.fullname},`,
+        `Thank you for joining <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity.Com</span></span>! Please verify your email by clicking below:`,
+        'Verify Email',
+        verificationUrl
+      )
+    );
+    if (!emailSent) {
+      logger.warn(`Failed to resend verification email to: ${email}`);
+      return res.status(500).json({ success: false, message: 'Failed to send verification email. Please try again later.' });
+    }
+    logger.info(`Verification email resent to user: ${user._id} (${user.personalInfo.email})`);
+    return res.status(200).json({
+      success: true,
+      message: 'A new verification link has been sent to your email. Please check your inbox.',
+    });
+  }
+  catch (error) {
+    logger.error(`Resend verification error: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'An error occurred while resending verification email. Please try again later.' });
+  }
+}
