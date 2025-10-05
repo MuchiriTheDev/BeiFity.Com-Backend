@@ -96,7 +96,7 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI("AIzaSyAX6iMtJTSEL9P4Ea33ExcehmMmu6R4LHM");
+    const genAI = new GoogleGenerativeAI("AIzaSyCCrDGMjwAu8wRreV8iGdLfAXg9WxTjZ9E");
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     // Prepare prompt for AI verification and findings
@@ -377,6 +377,16 @@ export const markAsSold = async (req, res) => {
       'listing_sold',
       `Congratulations! Your listing "${listing.productInfo.name}" has been marked as sold.`,
       null,
+      session
+    );
+
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+
+    await sendNotification(
+      admin._id,
+      'admin_listing_sold',
+      `The listing "${listing.productInfo.name}" by ${user.personalInfo.fullname} has been marked as sold.`,  
+      userId,
       session
     );
 
@@ -922,7 +932,7 @@ export const markAsUnSold = async (req, res) => {
     logger.error(`Error marking listing as unsold: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to mark listing as unsold' });
   } finally {
-    session.end同一个Session();
+    session.endSession();
   }
 };
 
