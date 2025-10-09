@@ -7,9 +7,9 @@ import { userModel } from '../models/User.js';
 passport.use(
   new GoogleStrategy(
     {
-      clientID: env.CLIENT_ID,
-      clientSecret: env.CLIENT_SECRET,
-      callbackURL: ` ${env.BACKEND_URL}/api/users/google/callback`,
+      clientID: process.env.CLIENT_ID,
+      clientSecret: process.env.CLIENT_SECRET,
+      callbackURL: `${process.env.BACKEND_URL}/users/google/callback`,
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
@@ -22,7 +22,7 @@ passport.use(
             personalInfo: {
               fullname: profile.displayName,
               email,
-              password: await bcrypt.hash(email, 10), // No password for OAuth users
+              password: await bcrypt.hash(profile.id, 10), // No password for OAuth users
               profilePicture: profile.photos[0].value,
               phone: '+254712345678', // Prompt user to add later
               verified: true, // Google-verified email
