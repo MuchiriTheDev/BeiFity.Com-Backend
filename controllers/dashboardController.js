@@ -58,17 +58,14 @@ export const getSellerOverview = async (req, res) => {
     const transData = successfulTransactionsAgg[0] || { totalRevenue: user.analytics.totalSales.amount, salesCount: user.analytics.salesCount };
 
     // Recent inquiries (using reports on seller's listings as proxy for inquiries)
+    // FIXED: First get seller's productIds to match reportedEntityId (assuming it's productId string)
+    const sellerProductIds = await listingModel.distinct('productInfo.productId', { seller: { sellerId: sellerId } });
     const recentInquiries = await ReportModel.find({
       reportType: 'listing',
-      status: { $ne: 'Dismissed' },
+      reportedEntityId: { $in: sellerProductIds },
+      status: { $in: ['Pending', 'Under Review'] }, // Standardized to active statuses
       createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
     }).populate('reporterId', 'personalInfo.fullname personalInfo.profilePicture').sort({ createdAt: -1 }).limit(5).lean();
-
-    // Filter to seller's listings
-    const sellerListingsIds = await listingModel.distinct('_id', { seller: { sellerId: sellerId } });
-    const sellerInquiries = recentInquiries.filter(report => 
-      sellerListingsIds.some(id => id.toString() === report.reportedEntityId)
-    );
 
     const overview = {
       stats: {
@@ -85,7 +82,7 @@ export const getSellerOverview = async (req, res) => {
         balance: user.financials.balance || 0,
         joinedDate: user.createdAt
       },
-      recentInquiries: sellerInquiries,
+      recentInquiries,
       referralCode: user.referralCode
     };
 
@@ -148,7 +145,7 @@ export const getSellerTransactions = async (req, res) => {
     // Filter and project items for seller only
     const sellerTransactions = transactions.map(trans => ({
       ...trans,
-      items: trans.items.filter(item => item.sellerId === sellerId)
+      items: trans.items.filter(item => item.sellerId._id && item.sellerId._id.toString() === sellerId.toString())
     })).filter(trans => trans.items.length > 0);
 
     const total = await TransactionModel.countDocuments({ 
@@ -165,7 +162,6 @@ export const getSellerTransactions = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 export const getSellerAnalytics = async (req, res) => {
   try {
     const sellerId = req.user._id;
@@ -180,7 +176,9 @@ export const getSellerAnalytics = async (req, res) => {
     }
 
     // Profile views history (from user.analytics.profileViews.history, filtered)
-    const user = await userModel.findById(sellerId).select('analytics.profileViews.history analytics.totalSales.history').lean();
+    // FIXED: Expanded select to include salesCount
+    const user = await userModel.findById(sellerId).select('analytics.profileViews.history analytics.totalSales.history analytics.salesCount analytics.profileViews.total').lean();
+    console.log("user found: ", user)
     const profileViewsHistory = (user?.analytics?.profileViews?.history || [])
       .filter(h => !dateFilter.$gte || h.date >= dateFilter.$gte)
       .reduce((acc, h) => {
@@ -189,22 +187,25 @@ export const getSellerAnalytics = async (req, res) => {
         return acc;
       }, {});
 
+      console.log('Profile Views History: ', profileViewsHistory)
     // Listing views and sales trends (aggregate from listings and transactions)
+    // FIXED: Remove dateFilter from match to include all historical data for trend; group by createdAt for historical grouping
     const listingsViewsAgg = await listingModel.aggregate([
-      { $match: { seller: { sellerId: sellerId }, createdAt: dateFilter } },
+      { $match: { seller: { sellerId: sellerId } } }, // Removed dateFilter to bring all data
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$updatedAt' } },
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
           views: { $sum: { $size: '$analytics.views.uniqueViewers' } },
           inquiries: { $sum: '$analytics.inquiries' },
           negotiations: { $sum: '$analytics.negotiationAttempts' }
         }
       },
       { $sort: { _id: 1 } }
-    ]);
+    ])
+    console.log('Listing Views Agrregate: ', listingsViewsAgg)
 
     const salesTrendAgg = await TransactionModel.aggregate([
-      { $match: { status: 'completed', createdAt: dateFilter, 'items.sellerId': sellerId } },
+      { $match: { status: 'completed', 'items.sellerId': sellerId } }, // Removed dateFilter to bring all historical sales
       { $unwind: '$items' },
       { $match: { 'items.sellerId': sellerId } },
       {
@@ -216,6 +217,26 @@ export const getSellerAnalytics = async (req, res) => {
       },
       { $sort: { _id: 1 } }
     ]);
+    console.log('Sales Trend Agg:', salesTrendAgg)
+
+    // FIXED: totalListingViews aggregate without date filter for overall
+    const totalListingViewsAgg = await listingModel.aggregate([
+      { $match: { seller: { sellerId: sellerId } } },
+      { $group: { _id: null, total: { $sum: { $size: '$analytics.views.uniqueViewers' } } } }
+    ]);
+    const totalListingViews = totalListingViewsAgg[0]?.total || 0;
+
+    // FIXED: Aggregate for totalInquiries (to match aggData from overview)
+    const listingsAggOverall = await listingModel.aggregate([
+      { $match: { seller: { sellerId: sellerId } } },
+      {
+        $group: {
+          _id: null,
+          totalInquiries: { $sum: '$analytics.inquiries' },
+        }
+      }
+    ]);
+    const aggDataOverall = listingsAggOverall[0] || { totalInquiries: 0 };
 
     const analytics = {
       profileViews: Object.entries(profileViewsHistory).map(([date, count]) => ({ date, count })),
@@ -223,11 +244,13 @@ export const getSellerAnalytics = async (req, res) => {
       salesTrend: salesTrendAgg.map(d => ({ date: d._id, revenue: d.revenue, orders: d.orders })),
       overall: {
         totalProfileViews: user?.analytics?.profileViews?.total || 0,
-        totalListingViews: await listingModel.aggregate([{ $match: { seller: { sellerId: sellerId } } }, { $group: { _id: null, total: { $sum: { $size: '$analytics.views.uniqueViewers' } } } }])?.[0]?.total || 0,
-        conversionRate: user?.analytics?.salesCount ? (user.analytics.salesCount / (user.analytics.orderCount || 1)) * 100 : 0
+        totalListingViews,
+        // FIXED: For seller, use salesCount / total inquiries as conversion (assuming inquiries proxy for leads)
+        conversionRate: aggDataOverall.totalInquiries ? (user?.analytics?.salesCount / aggDataOverall.totalInquiries) * 100 : 0
       }
     };
-
+    
+    console.log(analytics)
     res.status(200).json({ success: true, data: analytics });
   } catch (error) {
     console.error('Error fetching seller analytics:', error);
@@ -247,7 +270,7 @@ export const getSellerInquiries = async (req, res) => {
       reportType: 'listing',
       reportedEntityId: { $in: sellerListings },
       status: { $in: ['Pending', 'Under Review'] },
-      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // FIXED: Consistent 30-day filter
     })
       .populate('reporterId', 'personalInfo.fullname personalInfo.email personalInfo.profilePicture')
       .sort({ createdAt: -1 })
@@ -255,10 +278,12 @@ export const getSellerInquiries = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
+    // FIXED: Total with date filter for consistency
     const total = await ReportModel.countDocuments({
       reportType: 'listing',
       reportedEntityId: { $in: sellerListings },
-      status: { $in: ['Pending', 'Under Review'] }
+      status: { $in: ['Pending', 'Under Review'] },
+      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
     });
 
     // Augment with listing details

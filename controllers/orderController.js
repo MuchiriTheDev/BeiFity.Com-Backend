@@ -872,9 +872,6 @@ export const getOrders = async (req, res) => {
       .sort({ createdAt: -1})
       .lean();
 
-    console.log('Raw orders fetched:', orders.length);
-    console.log(orders)
-
     if (!orders || orders.length === 0) {
       logger.info(`No orders found for seller ${requesterId}`);
       return res.status(200).json({ success: true, data: [], message: 'No orders found' });
