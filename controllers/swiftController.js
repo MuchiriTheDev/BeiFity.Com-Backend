@@ -668,6 +668,9 @@ export const handleSwiftWebhook = async (req, res) => {
           order = await orderModel.findOne({ orderId: transaction.orderId }).session(session).populate('items.sellerId customerId');
           if (order) {
             logger.info(`Found order for rollback: ${order._id}`);
+            // Ensure order status is pending for retry
+            order.status = 'pending';
+            await order.save({ session });
             // Restore inventory for non-cancelled items
             for (const item of order.items.filter(i => !i.cancelled)) {
               await listingModel.updateOne(
@@ -706,9 +709,8 @@ export const handleSwiftWebhook = async (req, res) => {
               { $unset: { transactionId: '' } },
               { session }
             );
-            // Delete order if no items left or fully cancelled (optional; keep for records)
-            await orderModel.deleteOne({ _id: order._id }, { session });
-            logger.info(`Rolled back and deleted order ${order.orderId}`);
+            // REMOVED: Do not delete order - keep for retry
+            logger.info(`Rolled back transaction and reset order ${order.orderId} to pending for retry`);
           } else {
             logger.warn(`Transaction found but order not found for rollback`, { orderId: transaction.orderId });
           }

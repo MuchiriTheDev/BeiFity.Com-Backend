@@ -68,7 +68,7 @@ orderSchema.pre('save', async function (next) {
     } else if (itemStatuses.every(status => status === 'cancelled') || returnStatuses.every(status => status === 'returned')) {
       this.status = 'cancelled';
     } else {
-      this.status = 'paid';
+      this.status = 'pending';  // Default to pending for new/unpaid orders
     }
     for (const item of this.items) {
       const listing = await listingModel.findOne({ 'productInfo.productId': item.productId });
