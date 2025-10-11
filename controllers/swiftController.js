@@ -617,7 +617,7 @@ export const initiatePayout = async (transactionId, itemId, session) => {
     return { error: true, message: error.message };
   }
 };
-// Modified handleSwiftWebhook function
+/// Modified handleSwiftWebhook function - Optimized for speed
 export const handleSwiftWebhook = async (req, res) => {
   console.log('Received SWIFT webhook:', req.body);
   logger.info('SWIFT webhook received', { 
@@ -626,13 +626,13 @@ export const handleSwiftWebhook = async (req, res) => {
     status: req.body.status 
   });
   try {
-    // Wrap core DB logic in retryable transaction
+    // Wrap ONLY critical DB logic in retryable transaction (minimize scope for speed)
     const txResult = await withTransactionRetry(async (session) => {
       logger.debug('Starting webhook transaction processing', { external_reference: req.body.external_reference });
       const input = req.body;
       const signature = req.headers['x-swiftwallet-signature'];
 
-      // Verify HMAC signature
+      // Verify HMAC signature (fast, no DB)
       logger.debug('Verifying webhook signature', { hasSecret: !!process.env.SWIFT_WEBHOOK_SECRET });
       const webhookSecret = process.env.SWIFT_WEBHOOK_SECRET;
       if (webhookSecret) {
@@ -655,7 +655,7 @@ export const handleSwiftWebhook = async (req, res) => {
         
         let order = null;  // FIXED: Declare outside with null fallback to avoid ReferenceError
         
-        // Handle failure: Rollback order state (only if not already completed)
+        // Handle failure: Rollback order state (only if not already completed) - Keep minimal
         logger.debug('Processing webhook failure - keeping transaction pending');
         const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
         if (transaction) {
@@ -670,7 +670,7 @@ export const handleSwiftWebhook = async (req, res) => {
             // Ensure order status is pending for retry
             order.status = 'pending';
             await order.save({ session });
-            // Restore inventory for non-cancelled items
+            // Restore inventory for non-cancelled items (batch if possible, but sequential for safety)
             for (const item of order.items.filter(i => !i.cancelled)) {
               await listingModel.updateOne(
                 { 'productInfo.productId': item.productId },
@@ -692,14 +692,15 @@ export const handleSwiftWebhook = async (req, res) => {
               { session }
             );
             logger.debug(`Reset buyer stats for ${order.customerId}`);
-            // Reset seller pending counts
-            for (const item of order.items.filter(i => !i.cancelled)) {
+            // Reset seller pending counts (batch by unique sellers)
+            const uniqueSellers = [...new Set(order.items.filter(i => !i.cancelled).map(i => i.sellerId))];
+            for (const sellerId of uniqueSellers) {
               await userModel.updateOne(
-                { _id: item.sellerId },
+                { _id: sellerId },
                 { $inc: { 'stats.pendingOrdersCount': -1 } },
                 { session }
               );
-              logger.debug(`Reset seller pending count for ${item.sellerId}`);
+              logger.debug(`Reset seller pending count for ${sellerId}`);
             }
             // REMOVED: Do not delete transaction - keep in pending/failed mode
             transaction.status = 'failed';  // Or 'pending' if you prefer to allow retry without marking as failed
@@ -758,7 +759,7 @@ export const handleSwiftWebhook = async (req, res) => {
         itemsCount: order.items.length 
       });
 
-      // Parse paidAt correctly
+      // Parse paidAt correctly (fast)
       let paidAt = new Date();  // Fallback to now
       if (result && result.TransactionDate) {
         const tsStr = result.TransactionDate.toString().padStart(14, '0');  // Ensure 14 chars
@@ -781,7 +782,7 @@ export const handleSwiftWebhook = async (req, res) => {
       }
       logger.debug('Parsed paidAt', { paidAt: paidAt.toISOString() });
 
-      // Update Transaction with final details
+      // Update Transaction with final details (minimal)
       logger.debug('Updating transaction status to completed');
       transaction.status = 'completed';
       transaction.swiftServiceFee = service_fee || transaction.swiftServiceFee;
@@ -795,7 +796,7 @@ export const handleSwiftWebhook = async (req, res) => {
       logger.debug('Transaction saved after status update', { netReceived: transaction.netReceived, swiftServiceFee: transaction.swiftServiceFee });
 
 
-      // Update Order status to paid
+      // Update Order status to paid (fast)
       if (order.status !== 'paid') {
         logger.debug('Updating order status to paid');
         order.status = 'paid';
@@ -809,6 +810,7 @@ export const handleSwiftWebhook = async (req, res) => {
       console.log('Net For Sellers', transaction.netReceived); // User's log
       logger.debug('Pre-calculation: itemsTotal', { itemsTotal, commissionRate, platformCommission_total });
 
+      // Batch calculate item shares (no await here, just compute)
       for (const transactionItem of transaction.items.filter(item => !(item.cancelled ?? false))) { // Safe undefined check
         const itemAmount = transactionItem.itemAmount || 0; // Safe
         // FIXED: Prorate commission on itemsTotal only
@@ -839,6 +841,7 @@ export const handleSwiftWebhook = async (req, res) => {
       console.log('After save, sellerShare:', transaction.items[0].sellerShare); // User's log - now 5!
       logger.debug('Platform balance calculated', { totalPlatformCommission, platformBalance });
 
+      // Update admin balance (fast)
       const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
       if (admin) {
         await userModel.findByIdAndUpdate(
@@ -851,7 +854,7 @@ export const handleSwiftWebhook = async (req, res) => {
         logger.warn('No admin user found for balance update');
       }
 
-      // Update sellers' balance and analytics immediately after payment
+      // OPTIMIZED: Group sellers and prepare bulk updates (minimize queries)
       // Group transaction items by seller for efficiency (use ObjectId for keys)
       const sellerGroups = {};
       for (const txItem of transaction.items.filter(item => !item.cancelled)) {
@@ -871,23 +874,24 @@ export const handleSwiftWebhook = async (req, res) => {
       }
       logger.debug('Seller groups formed', { groupCount: Object.keys(sellerGroups).length });
 
-      // For each seller group: Update balance, analytics, and push history (fetch listingId per item)
-      for (const [sellerIdStr, group] of Object.entries(sellerGroups)) {
-        logger.debug(`Processing seller group ${sellerIdStr}`, { totalShare: group.totalShare, numItems: group.numItems });
-        // Fetch listings for history (using productId from order items)
-        const historyEntries = [];
-        for (const txItem of group.items) {
-          const orderItem = order.items.find(oi => oi._id.toString() === txItem.itemId.toString());
-          if (orderItem) {
-            const listing = await listingModel.findOne({ 'productInfo.productId': orderItem.productId }).session(session);
-            historyEntries.push({
-              amount: txItem.sellerShare,
-              listingId: listing?._id || null,  // Use listing._id if found
-              date: paidAt,
-            });
-            logger.debug(`Added history entry for item ${orderItem.productId}`, { listingFound: !!listing });
-          }
-        }
+      // OPTIMIZED: Prepare history entries in batch (fetch all listings once if needed, but per group for now)
+      const historyPromises = Object.entries(sellerGroups).map(async ([sellerIdStr, group]) => {
+        logger.debug(`Preparing updates for seller group ${sellerIdStr}`, { totalShare: group.totalShare, numItems: group.numItems });
+        // Fetch listings for history (batch per seller - parallel)
+        const orderItemsForSeller = order.items.filter(oi => group.items.some(gi => gi.itemId.toString() === oi._id.toString()));
+        const productIds = orderItemsForSeller.map(oi => oi.productId);
+        const listings = await listingModel.find({ 'productInfo.productId': { $in: productIds } }).session(session); // Batch fetch
+        const listingMap = new Map(listings.map(l => [l.productInfo.productId, l._id]));
+        
+        const historyEntries = group.items.map(txItem => {
+          const orderItem = orderItemsForSeller.find(oi => oi._id.toString() === txItem.itemId.toString());
+          const listingId = orderItem ? listingMap.get(orderItem.productId) : null;
+          return {
+            amount: txItem.sellerShare,
+            listingId: listingId || null,  // Use listing._id if found
+            date: paidAt,
+          };
+        });
 
         const sellerIdObj = group.sellerIdObj;  // Use ObjectId for update
         // Update seller: +totalShare to balance, +numItems to salesCount, +totalShare to totalSales.amount, push history
@@ -907,10 +911,14 @@ export const handleSwiftWebhook = async (req, res) => {
         );
 
         logger.info(`Seller ${sellerIdStr} updated post-payment: +KES ${group.totalShare} to balance/analytics (${group.numItems} items, pending delivery)`, { orderId: order.orderId });
-      }
+        return { sellerId: sellerIdStr, success: true };
+      });
+
+      // Await all seller updates in parallel
+      await Promise.all(historyPromises);
 
       logger.info(`SWIFT webhook processed successfully`, { transaction_id, orderId: order.orderId, netReceived: transaction.netReceived, platformBalance });
-      return { type: 'success', order, transaction, paidAt };  // Return for post-processing
+      return { type: 'success', order, transaction, paidAt, sellerGroups };  // Include sellerGroups for notifications
     }, 5, 'SWIFT webhook transaction');
 
     logger.debug('Webhook transaction completed', { type: txResult?.type });
@@ -921,20 +929,27 @@ export const handleSwiftWebhook = async (req, res) => {
       return res.status(200).send('OK');
     }
 
-    // Post-transaction processing (notifications/emails - outside retry, fire-and-forget)
+    // OPTIMIZED: Post-transaction processing (notifications/emails - outside transaction, parallel fire-and-forget)
+    // Use Promise.all for parallel execution to speed up response
+    const postProcessingPromises = [];
+
     if (txResult.type === 'failure' && txResult.order) {
       const order = txResult.order;
       const buyer = order.customerId;
       logger.debug('Processing failure notifications', { orderId: order.orderId });
       const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful. Please try again or contact support if the issue persists.`;
-      try {
-        await sendNotification( 
+      
+      // Parallel: Notification + Email
+      postProcessingPromises.push(
+        sendNotification( 
           buyer._id.toString(),
           'order',
           buyerNotificationContent, 
           null
-        );  // No session
-        await sendEmail(
+        ).then(() => logger.info(`Failed payment notification created for buyer ${buyer._id}`, { orderId: order.orderId }))
+          .catch(err => logger.warn(`Failed to create failed payment notification: ${err.message}`, { orderId: order.orderId })),
+        
+        sendEmail(
           buyer.personalInfo.email,
           'Payment Failed - BeiFity.Com',
           `Dear ${sanitizeHtml(buyer.personalInfo.fullname || 'Customer')},
@@ -942,162 +957,165 @@ export const handleSwiftWebhook = async (req, res) => {
           <br><br>Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful.
             <a href="${FRONTEND_URL}/your-orders?orderId=${order.orderId}">View Details and Try Repayment</a> 
           .Please try again or contact support if the issue persists.<br><br>Best regards,<br>BeiFity Team`
-        );
-        logger.info(`Failed payment notification created for buyer ${buyer._id}`, { orderId: order.orderId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create failed payment notification: ${notificationError.message}`, { orderId: order.orderId });
-      }
+        ).then(() => logger.info(`Failed payment email sent to buyer ${buyer._id}`, { orderId: order.orderId }))
+          .catch(err => logger.warn(`Failed to send failed payment email: ${err.message}`, { orderId: order.orderId }))
+      );
 
-      // Notify admin (no session)
-      const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
-      if (admin && admin.personalInfo?.email) {
-        await sendEmail(
-          admin.personalInfo.email,
-          'Order Payment Failed - BeiFity.Com',
-          `Admin,<br><br>The payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) has failed. Please review the order and assist the customer if needed.<br><br>Best regards,<br>BeiFity System`
-        );
-        logger.info(`Failed payment email sent to admin ${admin._id}`);
-      }
+      // Notify admin (parallel)
+      postProcessingPromises.push(
+        (async () => {
+          const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
+          if (admin && admin.personalInfo?.email) {
+            await sendEmail(
+              admin.personalInfo.email,
+              'Order Payment Failed - BeiFity.Com',
+              `Admin,<br><br>The payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) has failed. Please review the order and assist the customer if needed.<br><br>Best regards,<br>BeiFity System`
+            );
+            logger.info(`Failed payment email sent to admin ${admin._id}`);
+          }
+        })().catch(err => logger.warn(`Failed admin failure email: ${err.message}`, { orderId: order.orderId }))
+      );
+
     } else if (txResult.type === 'success') {
-      const { order, transaction, paidAt } = txResult;
+      const { order, transaction, paidAt, sellerGroups } = txResult;
       const buyer = order.customerId;
       const orderTime = order.createdAt.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
       const totalOrderPrice = order.totalAmount;
       const buyerName = sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer');
       logger.debug('Processing success notifications', { orderId: order.orderId, buyerId: buyer._id });
 
-      // Buyer: Full confirmation email and notification
-      if (buyer.preferences?.emailNotifications) {
-        logger.debug('Sending buyer email');
-        await withRetry(async () => {
-          const buyerEmailContent = generateOrderEmailBuyer(
-            buyerName,
-            order.items.filter(item => !item.cancelled),
-            orderTime,
-            totalOrderPrice,
-            order.deliveryAddress,
-            order.orderId,
-            [...new Set(order.items.filter(item => !item.cancelled).map(item => item.sellerId.toString()))],
-            null  // No URL
-          ).replace('has been placed', 'payment has been confirmed and is now processing');
-          const buyerEmailSent = await sendEmail(buyer.personalInfo.email, 'Order Confirmed - BeiFity.Com', buyerEmailContent);
-          if (!buyerEmailSent) throw new Error('Failed to send buyer confirmation email');
-          logger.info(`Order confirmation email sent to buyer ${buyer._id}`, { orderId: order.orderId });
-        }, 3, `Send buyer confirmation email for order ${order.orderId}`);
-      } else {
-        logger.info(`Buyer ${buyer._id} has email notifications disabled`, { orderId: order.orderId });
-      }
-
+      // Buyer: Full confirmation email and notification (parallel, with retry only if needed)
       const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${totalOrderPrice}) has been confirmed. Processing will begin soon.`;
-      try {
-        await sendNotification(
+      postProcessingPromises.push(
+        sendNotification(
           buyer._id.toString(),
           'order',
           buyerNotificationContent,
           null
-        );
-        logger.info(`Order confirmation notification created for buyer ${buyer._id}`, { orderId: order.orderId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create buyer confirmation notification: ${notificationError.message}`, { orderId: order.orderId });
-      }
+        ).then(() => logger.info(`Order confirmation notification created for buyer ${buyer._id}`, { orderId: order.orderId }))
+          .catch(err => logger.warn(`Failed to create buyer confirmation notification: ${err.message}`, { orderId: order.orderId })),
 
-      // Sellers: Confirmation emails and notifications (grouped by seller)
-      const sellerItemsMap = new Map();
-      order.items.filter(item => !item.cancelled).forEach(item => {
-        const sellerId = item.sellerId._id ? item.sellerId._id.toString() : item.sellerId.toString();
-        if (!sellerItemsMap.has(sellerId)) sellerItemsMap.set(sellerId, []);
-        sellerItemsMap.get(sellerId).push(item);
-      });
-      logger.debug('Seller items map created', { sellerCount: sellerItemsMap.size });
-
-      for (const [sellerId, items] of sellerItemsMap) {
-        console.log('Notifying seller with ID:', sellerId);
-        logger.debug(`Processing notifications for seller ${sellerId}`, { itemCount: items.length });
-        const seller = await userModel.findById(new mongoose.Types.ObjectId(sellerId));  // Ensure ObjectId
-        if (!seller || !seller.personalInfo?.email) {
-          logger.warn(`Failed to notify seller ${sellerId}: Seller not found or no email`, { orderId: order.orderId });
-          continue;
-        }
-
-        if (seller.preferences?.emailNotifications) {
-          logger.debug(`Sending email to seller ${sellerId}`);
-          await withRetry(async () => {
-            const sellerName = sanitizeHtml(seller.personalInfo.fullname || 'Seller');
-            const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-            const sellerEmailContent = generateOrderEmailSeller(
-              sellerName,
-              buyerName,
-              items,
-              orderTime,
-              order.deliveryAddress,
-              totalPrice,
-              buyer._id,
-              order.orderId,
-              null
-            ).replace('You have a new order', 'Payment confirmed for your new order');
-            const sellerEmailSent = await sendEmail(seller.personalInfo.email, 'New Order Confirmed - BeiFity.Com', sellerEmailContent);
-            if (!sellerEmailSent) throw new Error('Failed to send seller confirmation email');
-            logger.info(`Order confirmation email sent to seller ${sellerId}`, { orderId: order.orderId });
-          }, 3, `Send seller confirmation email for order ${order.orderId} to seller ${sellerId}`);
-        } else {
-          logger.info(`Seller ${sellerId} has email notifications disabled`, { orderId: order.orderId });
-        }
-
-        const sellerShare = transaction.items
-          .filter(i => i.sellerId.toString() === sellerId)
-          .reduce((sum, i) => sum + i.sellerShare, 0);
-        const sellerNotificationContent = `Payment confirmed for Order ID: ${sanitizeHtml(order.orderId)}. Your share (KES ${sellerShare.toFixed(2)}) is pending after delivery for items: ${items.map(i => sanitizeHtml(i.name)).join(', ')}.`;
-        try {
-          await sendNotification(
-            sellerId,
-            'order',
-            sellerNotificationContent,
-            buyer._id.toString()
-          );
-          logger.info(`Order confirmation notification created for seller ${sellerId}`, { orderId: order.orderId });
-        } catch (notificationError) {
-          logger.warn(`Failed to create seller confirmation notification: ${notificationError.message}`, { orderId: order.orderId, sellerId });
-        }
-      }
-
-      // Admins: Confirmation notifications and emails
-      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences');
-      logger.debug('Fetched admins for notifications', { adminCount: admins.length });
-      for (const admin of admins) {
-        const adminNotificationContent = `A new order (ID: ${order.orderId}) has been placed and paid by ${buyerName} for a total of KES ${totalOrderPrice}.`;
-        try {
-          await sendNotification(
-            admin._id.toString(),
-            'order',
-            adminNotificationContent,
-            buyer._id.toString()
-          );
-          logger.info(`Order confirmation notification created for admin ${admin._id}`, { orderId: order.orderId });
-        } catch (notificationError) {
-          logger.warn(`Failed to create admin confirmation notification: ${notificationError.message}`, { orderId: order.orderId, adminId: admin._id });
-        }
-
-        if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
-          logger.debug(`Sending email to admin ${admin._id}`);
-          await withRetry(async () => {
-            const adminEmailContent = generateOrderEmailAdmin(
+        (async () => {
+          if (buyer.preferences?.emailNotifications) {
+            logger.debug('Sending buyer email');
+            const buyerEmailContent = generateOrderEmailBuyer(
               buyerName,
               order.items.filter(item => !item.cancelled),
               orderTime,
               totalOrderPrice,
               order.deliveryAddress,
               order.orderId,
-              buyer._id
-            ).replace('has been placed', 'has been paid and confirmed');
-            const adminEmailSent = await sendEmail(admin.personalInfo.email, 'New Order Confirmed - BeiFity.Com Admin Notification', adminEmailContent);
-            if (!adminEmailSent) throw new Error('Failed to send admin confirmation email');
-            logger.info(`Order confirmation email sent to admin ${admin._id}`, { orderId: order.orderId });
-          }, 3, `Send admin confirmation email for order ${order.orderId} to admin ${admin._id}`);
-        } else {
-          logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId: order.orderId });
-        }
-      }
+              [...new Set(order.items.filter(item => !item.cancelled).map(item => item.sellerId.toString()))],
+              null  // No URL
+            ).replace('has been placed', 'payment has been confirmed and is now processing');
+            await sendEmail(buyer.personalInfo.email, 'Order Confirmed - BeiFity.Com', buyerEmailContent);
+            logger.info(`Order confirmation email sent to buyer ${buyer._id}`, { orderId: order.orderId });
+          } else {
+            logger.info(`Buyer ${buyer._id} has email notifications disabled`, { orderId: order.orderId });
+          }
+        })().catch(err => logger.warn(`Failed buyer email: ${err.message}`, { orderId: order.orderId }))
+      );
+
+      // Sellers: Confirmation emails and notifications (grouped, parallel per seller)
+      const sellerPromises = Object.entries(sellerGroups || {}).map(([sellerIdStr, group]) => {
+        const items = order.items.filter(item => group.items.some(gi => gi.itemId.toString() === item._id.toString()));
+        console.log('Notifying seller with ID:', sellerIdStr);
+        logger.debug(`Processing notifications for seller ${sellerIdStr}`, { itemCount: items.length });
+        return (async () => {
+          const seller = await userModel.findById(new mongoose.Types.ObjectId(sellerIdStr));  // Ensure ObjectId
+          if (!seller || !seller.personalInfo?.email) {
+            logger.warn(`Failed to notify seller ${sellerIdStr}: Seller not found or no email`, { orderId: order.orderId });
+            return;
+          }
+
+          const sellerName = sanitizeHtml(seller.personalInfo.fullname || 'Seller');
+          const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+          // Parallel email + notification for this seller
+          await Promise.all([
+            (async () => {
+              if (seller.preferences?.emailNotifications) {
+                logger.debug(`Sending email to seller ${sellerIdStr}`);
+                const sellerEmailContent = generateOrderEmailSeller(
+                  sellerName,
+                  buyerName,
+                  items,
+                  orderTime,
+                  order.deliveryAddress,
+                  totalPrice,
+                  buyer._id,
+                  order.orderId,
+                  null
+                ).replace('You have a new order', 'Payment confirmed for your new order');
+                await sendEmail(seller.personalInfo.email, 'New Order Confirmed - BeiFity.Com', sellerEmailContent);
+                logger.info(`Order confirmation email sent to seller ${sellerIdStr}`, { orderId: order.orderId });
+              } else {
+                logger.info(`Seller ${sellerIdStr} has email notifications disabled`, { orderId: order.orderId });
+              }
+            })().catch(err => logger.warn(`Failed seller ${sellerIdStr} email: ${err.message}`, { orderId: order.orderId })),
+
+            (async () => {
+              const sellerShare = group.totalShare || transaction.items
+                .filter(i => i.sellerId.toString() === sellerIdStr)
+                .reduce((sum, i) => sum + i.sellerShare, 0);
+              const sellerNotificationContent = `Payment confirmed for Order ID: ${sanitizeHtml(order.orderId)}. Your share (KES ${sellerShare.toFixed(2)}) is pending after delivery for items: ${items.map(i => sanitizeHtml(i.name)).join(', ')}.`;
+              await sendNotification(
+                sellerIdStr,
+                'order',
+                sellerNotificationContent,
+                buyer._id.toString()
+              );
+              logger.info(`Order confirmation notification created for seller ${sellerIdStr}`, { orderId: order.orderId });
+            })().catch(err => logger.warn(`Failed seller ${sellerIdStr} notification: ${err.message}`, { orderId: order.orderId }))
+          ]);
+        })();
+      });
+      postProcessingPromises.push(...sellerPromises);
+
+      // Admins: Confirmation notifications and emails (parallel per admin)
+      const adminPromise = (async () => {
+        const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences');
+        logger.debug('Fetched admins for notifications', { adminCount: admins.length });
+        const adminNotificationContent = `A new order (ID: ${order.orderId}) has been placed and paid by ${buyerName} for a total of KES ${totalOrderPrice}.`;
+        
+        // Parallel notifications for all admins
+        await Promise.all(
+          admins.map(async (admin) => {
+            await sendNotification(
+              admin._id.toString(),
+              'order',
+              adminNotificationContent,
+              buyer._id.toString()
+            );
+            logger.info(`Order confirmation notification created for admin ${admin._id}`, { orderId: order.orderId });
+          }).concat(
+            // Parallel emails for admins with notifications enabled
+            admins
+              .filter(admin => admin.personalInfo?.email && admin.preferences?.emailNotifications)
+              .map(async (admin) => {
+                logger.debug(`Sending email to admin ${admin._id}`);
+                const adminEmailContent = generateOrderEmailAdmin(
+                  buyerName,
+                  order.items.filter(item => !item.cancelled),
+                  orderTime,
+                  totalOrderPrice,
+                  order.deliveryAddress,
+                  order.orderId,
+                  buyer._id
+                ).replace('has been placed', 'has been paid and confirmed');
+                await sendEmail(admin.personalInfo.email, 'New Order Confirmed - BeiFity.Com Admin Notification', adminEmailContent);
+                logger.info(`Order confirmation email sent to admin ${admin._id}`, { orderId: order.orderId });
+              })
+          )
+        ).catch(err => logger.warn(`Failed admin processing: ${err.message}`, { orderId: order.orderId }));
+      })();
+      postProcessingPromises.push(adminPromise);
     }
+
+    // Fire all post-processing in parallel (non-blocking for response)
+    Promise.all(postProcessingPromises)
+      .then(() => logger.info('All post-processing completed'))
+      .catch(err => logger.warn(`Some post-processing failed: ${err.message}`));
 
     // Early returns for non-processing cases
     if (txResult.type === 'not_found' || txResult.type === 'order_not_found') {
@@ -1105,8 +1123,8 @@ export const handleSwiftWebhook = async (req, res) => {
       return res.status(200).send('OK');
     }
 
-    logger.info('Webhook fully processed successfully');
-    return res.status(200).send('OK');
+    logger.info('Webhook fully processed successfully (DB committed, notifications queued)');
+    return res.status(200).send('OK');  // Respond immediately after DB commit
   } catch (error) {
     console.error('Error processing SWIFT webhook:', error);
     logger.error(`SWIFT webhook error: ${error.message}`, { stack: error.stack });
