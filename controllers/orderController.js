@@ -296,6 +296,7 @@ export const retryOrderPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing orderId parameter' });
     }
     const order = await orderModel.findOne({ orderId }).session(session);
+    console.log("order status:",order.status)
     if (!order) {
       logger.warn(`Retry order payment failed: Order ${orderId} not found`, { userId: requesterId, ip: req.ip });
       return res.status(404).json({ success: false, message: 'Order not found' });
@@ -304,7 +305,9 @@ export const retryOrderPayment = async (req, res) => {
       logger.warn(`Retry order payment failed: User ${requesterId} attempted to access order ${orderId} owned by ${order.customerId}`, { ip: req.ip });
       return res.status(403).json({ success: false, message: 'Unauthorized to access this order' });
     }
-    const transaction = await TransactionModel.findOne({orderId: orderId}).session(session);
+    const transaction = await TransactionModel.findOne({ orderId: orderId}).session(session);
+    console.log(transaction)
+    console.log("Transactions status:",transaction.status)
     if (order.status !== 'pending') {
       logger.warn(`Retry order payment failed: Order ${orderId} is not pending`, { userId: requesterId, ip: req.ip });
       return res.status(400).json({ success: false, message: 'Only pending orders can retry payment' });
@@ -344,6 +347,7 @@ export const retryOrderPayment = async (req, res) => {
       data: { authorization_url: null, reference: paymentResult.reference },
     });
   } catch (error) {
+    console.log(error)
     if (!transactionCommitted) {
       await session.abortTransaction();
       logger.info(`Transaction aborted for payment retry attempt`, { userId: req.user?._id });

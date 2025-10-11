@@ -617,7 +617,6 @@ export const initiatePayout = async (transactionId, itemId, session) => {
     return { error: true, message: error.message };
   }
 };
-
 // Modified handleSwiftWebhook function
 export const handleSwiftWebhook = async (req, res) => {
   console.log('Received SWIFT webhook:', req.body);
@@ -657,17 +656,17 @@ export const handleSwiftWebhook = async (req, res) => {
         let order = null;  // FIXED: Declare outside with null fallback to avoid ReferenceError
         
         // Handle failure: Rollback order state (only if not already completed)
-        logger.debug('Processing webhook failure - rolling back order');
+        logger.debug('Processing webhook failure - keeping transaction pending');
         const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
         if (transaction) {
           if (transaction.status === 'completed') {
             logger.info(`Duplicate failure webhook ignored for already-completed transaction ${external_reference}`);
             return { type: 'duplicate' };  // Skip rollback for completed (idempotency)
           }
-          logger.info(`Found transaction for rollback: ${transaction._id}`);
+          logger.info(`Found transaction for failure handling: ${transaction._id}`);
           order = await orderModel.findOne({ orderId: transaction.orderId }).session(session).populate('items.sellerId customerId');
           if (order) {
-            logger.info(`Found order for rollback: ${order._id}`);
+            logger.info(`Found order for failure handling: ${order._id}`);
             // Ensure order status is pending for retry
             order.status = 'pending';
             await order.save({ session });
@@ -702,20 +701,21 @@ export const handleSwiftWebhook = async (req, res) => {
               );
               logger.debug(`Reset seller pending count for ${item.sellerId}`);
             }
-            // Delete transaction and unlink from order
-            await TransactionModel.deleteOne({ _id: transaction._id }, { session });
+            // REMOVED: Do not delete transaction - keep in pending/failed mode
+            transaction.status = 'failed';  // Or 'pending' if you prefer to allow retry without marking as failed
+            await transaction.save({ session });
+            // Unlink transaction from order to allow retry
             await orderModel.updateOne(
               { _id: order._id },
               { $unset: { transactionId: '' } },
               { session }
             );
-            // REMOVED: Do not delete order - keep for retry
-            logger.info(`Rolled back transaction and reset order ${order.orderId} to pending for retry`);
+            logger.info(`Transaction set to failed and unlinked from order ${order.orderId} for retry`);
           } else {
-            logger.warn(`Transaction found but order not found for rollback`, { orderId: transaction.orderId });
+            logger.warn(`Transaction found but order not found for failure handling`, { orderId: transaction.orderId });
           }
         } else {
-          logger.warn(`No transaction found for rollback`, { external_reference });
+          logger.warn(`No transaction found for failure handling`, { external_reference });
         }
 
         return { type: 'failure', order };  // Now safe: order is always defined (null if missing)
