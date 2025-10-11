@@ -1,10 +1,11 @@
 import mongoose from 'mongoose';
+import { calculateServiceFee } from '../utils/helper.js';
 
 const TransactionSchema = new mongoose.Schema(
   {
+    // In Transaction.js
     orderId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Order',
+      type: String,  // Changed to match Order.orderId
       required: true,
       index: true,
     },
@@ -26,12 +27,10 @@ const TransactionSchema = new mongoose.Schema(
     },
     swiftServiceFee: {
       type: Number,
-      required: true,
       min: 0,
     },
     netReceived: {
       type: Number,
-      required: true,
       min: 0,
     },
     items: [
@@ -54,6 +53,7 @@ const TransactionSchema = new mongoose.Schema(
         refundStatus: { type: String, enum: ['none', 'pending', 'returned', 'completed'], default: 'none' },
         refundedAmount: { type: Number, default: 0, min: 0 },
         returnStatus: { type: String, enum: ['none', 'pending', 'confirmed', 'rejected'], default: 'none' },
+        cancelled: { type: Boolean, default: false },  // ADDED: To match code assumptions
       },
     ],
     status: {
@@ -74,23 +74,56 @@ const TransactionSchema = new mongoose.Schema(
 );
 
 TransactionSchema.pre('save', function (next) {
-  const commissionRate = parseFloat(process.env.COMMISSION_RATE || 0.045);
-  const swiftFeeRate = parseFloat(process.env.SWIFT_FEE_RATE || 0.02); // Adjust based on SWIFT's actual fee structure
-  this.swiftServiceFee = this.totalAmount * swiftFeeRate;
-  this.netReceived = this.totalAmount - this.swiftServiceFee;
+  const commissionRate = parseFloat(process.env.COMMISSION_RATE || '0'); // 0 for no commissions now
+
+  // Use tiered flat fee instead of percentage
+  try {
+    this.swiftServiceFee = calculateServiceFee(this.totalAmount);
+  } catch (error) {
+    return next(new Error(`Invalid totalAmount for service fee: ${error.message}`));
+  }
+
+  // FIXED: Calculate based on itemsTotal (exclude delivery for commission/net)
+  const itemsTotal = this.items.reduce((sum, item) => {
+    return item.cancelled ? sum : sum + (item.itemAmount || 0);  // FIXED: Use itemAmount, not price/quantity
+  }, 0);
+
+  const platformCommission_total = itemsTotal * commissionRate;
+  const netForSellers = Math.max(itemsTotal - this.swiftServiceFee - platformCommission_total, 0);  // FIXED: Commission only on items; swift prorated via net
+
   this.items.forEach((item) => {
-    item.platformCommission = item.itemAmount * commissionRate;
-    item.sellerShare = item.itemAmount - item.platformCommission;
-    item.transferFee = item.sellerShare <= 1500 ? 20 : item.sellerShare <= 20000 ? 40 : 60;
-    item.netCommission = item.platformCommission - (item.itemAmount / this.totalAmount) * this.swiftServiceFee;
-    if (item.netCommission < 0) item.netCommission = 0;
-    item.owedAmount = item.sellerShare - item.transferFee;
-    if (item.owedAmount < 0) item.owedAmount = 0;
-    item.payoutStatus = 'manual_pending'; // Default to manual for no auto-splits
+    if (item.cancelled) {
+      item.itemAmount = 0;
+      item.sellerShare = 0;
+      item.platformCommission = 0;
+      item.transferFee = 0;
+      item.netCommission = 0;
+      item.owedAmount = 0;
+      item.payoutStatus = 'manual_pending';
+      item.deliveryConfirmed = false;
+      item.refundStatus = 'none';
+      item.refundedAmount = 0;
+      item.returnStatus = 'none';
+      return;
+    }
+
+    // FIXED: Do NOT override itemAmount (already set correctly)
+    // FIXED: Prorate platform commission on itemsTotal
+    item.platformCommission = itemsTotal > 0 ? ((item.itemAmount || 0) / itemsTotal) * platformCommission_total : 0;
+    item.sellerShare = itemsTotal > 0 ? ((item.itemAmount || 0) / itemsTotal) * netForSellers : 0;
+    // No transfer fees—always 0
+    item.transferFee = 0;
+    // netCommission: platform share per item (or 0 if not used)
+    item.netCommission = item.platformCommission;
+    item.owedAmount = item.sellerShare; // Full share, no deduction
+    item.payoutStatus = 'manual_pending';
+    item.deliveryConfirmed = false;
     if (!item.refundStatus) item.refundStatus = 'none';
     if (!item.refundedAmount) item.refundedAmount = 0;
     if (!item.returnStatus) item.returnStatus = 'none';
   });
+
+  this.netReceived = netForSellers; // For auditing (net to split among sellers)
   this.updatedAt = Date.now();
   next();
 });

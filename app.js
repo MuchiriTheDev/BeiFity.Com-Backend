@@ -26,9 +26,8 @@ import { initializeSocket } from './utils/socket.js';
 import env from './config/env.js';
 import './utils/emailMarketing.js'
 import transactionRouter from './routes/transactionRoutes.js';
-import financialRouter from './routes/financialRoutes.js';
-import { connectNgrok } from './middlewares/ngrok.js';
 import swiftRouter from './routes/swiftRouter.js';
+import dashboardRouter from './routes/dashboardRoutes.js';
 
 const app = express();
 const cache = new NodeCache({ stdTTL: 3600 });
@@ -96,7 +95,7 @@ app.use('/api/report', reportRouter);
 app.use('/api/cloudinary', cloudinaryRouter);
 app.use('/api/transactions', transactionRouter); // Cache transaction routes
 app.use('/api/payments', swiftRouter); // Paystack routes
-app.use('/api/financial', financialRouter); // Financial routes
+app.use('/api/dashboard', dashboardRouter)
 
 app.get('/', (req, res) => res.send('BeiFity API is running!'));
 

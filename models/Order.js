@@ -16,6 +16,8 @@ const itemSchema = new mongoose.Schema({
   },
   returnStatus: { type: String, enum: ['none', 'rejected', 'return_initiated', 'returned'], default: 'none' },
   cancelled: { type: Boolean, default: false },
+  cancellationReason: {type: String, default:""},
+  cancellationDetails: {type: String, default: ''},
   reportCount: { type: Number, default: 0 },
   refundStatus: { type: String, enum: ['none', 'pending', 'completed'], default: 'none' }, // Added
   refundedAmount: { type: Number, default: 0, min: 0 }, // Added
@@ -31,7 +33,12 @@ const deliveryAddressSchema = new mongoose.Schema({
 
 const orderSchema = new mongoose.Schema(
   {
-    orderId: { type: mongoose.Schema.Types.ObjectId, required: true, unique: true, default: () => new mongoose.Types.ObjectId() },
+    orderId: { 
+      type: String,  // Changed from ObjectId
+      required: true,
+      unique: true,
+      default: () => new mongoose.Types.ObjectId().toString(),  // Generate as string
+    },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     totalAmount: { type: Number, required: true, min: 0 },
     deliveryFee: { type: Number, required: true, min: 0, default: 0 },
@@ -61,7 +68,7 @@ orderSchema.pre('save', async function (next) {
     } else if (itemStatuses.every(status => status === 'cancelled') || returnStatuses.every(status => status === 'returned')) {
       this.status = 'cancelled';
     } else {
-      this.status = 'pending';
+      this.status = 'paid';
     }
     for (const item of this.items) {
       const listing = await listingModel.findOne({ 'productInfo.productId': item.productId });

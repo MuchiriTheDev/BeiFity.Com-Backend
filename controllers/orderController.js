@@ -20,7 +20,7 @@ import {
 } from '../utils/Templates.js';
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
-const commissionRate = 0.05; // 5% platform commission
+const commissionRate = parseFloat(process.env.COMMISSION_RATE || '0'); // 5% platform commission
 const SESSION_TIMEOUT = 30000; // 30 seconds timeout for Mongoose sessions
 
 // Utility function for retries
@@ -42,7 +42,6 @@ const withRetry = async (fn, maxRetries = 3, operationName = 'operation') => {
     }
   }
 };
-
 /**
  * Place Order
  * @route POST /api/orders/place-order
@@ -59,7 +58,7 @@ export const placeOrder = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const { customerId, totalAmount, items, deliveryAddress, deliveryFee } = req.body;
+    const { customerId, totalAmount, items, deliveryAddress, deliveryFee, paymentPhone } = req.body;
     const requesterId = req.user._id.toString();
 
     if (requesterId !== customerId) {
@@ -110,9 +109,9 @@ export const placeOrder = async (req, res) => {
         return res.status(400).json({ success: false, message: `Missing required delivery address field: ${field}` });
       }
     }
-    if (!/^\+?254[0-9]{9}$/.test(deliveryAddress.phone)) {
+    if (!/^\+?254[0-9]{9}$/.test(deliveryAddress.phone) && !/^\+?254[0-9]{9}$/.test(paymentPhone)) {
       logger.warn('Place order failed: Invalid phone', { userId: requesterId, ip: req.ip });
-      return res.status(400).json({ success: false, message: 'Valid Kenyan phone number required in delivery address' });
+      return res.status(400).json({ success: false, message: 'Valid Kenyan phone number required in delivery address or payment number' });
     }
 
     const calculatedTotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0) + deliveryFee;
@@ -136,6 +135,7 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid user email required for payment' });
     }
 
+    // Validate listings and sellers (but defer inventory updates)
     const listings = new Map();
     for (const item of items) {
       if (!mongoose.Types.ObjectId.isValid(item.sellerId)) {
@@ -160,26 +160,15 @@ export const placeOrder = async (req, res) => {
         return res.status(400).json({ success: false, message: `Listing not available for productId: ${item.productId}` });
       }
 
-      const updatedListing = await listingModel.findOneAndUpdate(
-        { 'productInfo.productId': item.productId, verified: 'Verified', isSold: false, inventory: { $gte: item.quantity } },
-        {
-          $inc: { inventory: -item.quantity, 'analytics.ordersNumber': 1 },
-          $set: { isSold: listing.inventory - item.quantity <= 0 },
-        },
-        { session, new: true }
-      );
-
-      if (!updatedListing) {
-        logger.warn(`Place order failed: Failed to update listing ${item.productId}`, { userId: requesterId, ip: req.ip });
-        return res.status(400).json({ success: false, message: `Failed to update listing for productId: ${item.productId}` });
-      }
-
-      listings.set(item.productId, updatedListing);
+      listings.set(item.productId, listing);
     }
 
+    // Generate orderId as string
+    const orderIdStr = new mongoose.Types.ObjectId().toString();
+
     const orderData = {
-      orderId: new mongoose.Types.ObjectId().toString(),
-      customerId: new mongoose.Types.ObjectId(customerId),
+      orderId: orderIdStr,
+      customerId: customerId,
       totalAmount,
       deliveryFee,
       status: 'pending',
@@ -207,12 +196,32 @@ export const placeOrder = async (req, res) => {
     const savedOrder = await newOrder.save({ session });
     logger.debug(`Saved order`, { orderId: savedOrder.orderId });
 
-    const paymentResult = await withRetry(() => initializePayment(savedOrder._id, session, user.personalInfo.email, deliveryFee), 3, `Initialize payment for order ${savedOrder.orderId}`);
+    // Initialize payment (uses savedOrder._id)
+    const paymentResult = await withRetry(() => initializePayment(savedOrder._id, session, user.personalInfo.email, deliveryFee, paymentPhone), 3, `Initialize payment for order ${orderIdStr}`);
     if (paymentResult.error) {
       logger.warn(`Place order failed: Payment initialization failed - ${paymentResult.message}`, { userId: requesterId, orderId: savedOrder.orderId });
       throw new Error(paymentResult.message);
     }
 
+    // Now update listings inventory (after payment init success)
+    for (const [productId, listing] of listings) {
+      const item = items.find(i => i.productId === productId);
+      const updatedListing = await listingModel.findOneAndUpdate(
+        { 'productInfo.productId': productId, verified: 'Verified', isSold: false, inventory: { $gte: item.quantity } },
+        {
+          $inc: { inventory: -item.quantity, 'analytics.ordersNumber': 1 },
+          $set: { isSold: listing.inventory - item.quantity <= 0 },
+        },
+        { session, new: true }
+      );
+
+      if (!updatedListing) {
+        logger.warn(`Place order failed: Failed to update listing ${productId}`, { userId: requesterId, ip: req.ip });
+        throw new Error(`Failed to update listing for productId: ${productId}`);
+      }
+    }
+
+    // Update user orders and stats
     await userModel.updateOne(
       { _id: user._id },
       { $push: { orders: savedOrder._id }, $inc: { 'stats.pendingOrdersCount': 1, 'analytics.orderCount': 1 } },
@@ -231,119 +240,32 @@ export const placeOrder = async (req, res) => {
     transactionCommitted = true;
     logger.info(`Transaction committed for order ${savedOrder.orderId}`, { userId: requesterId });
 
-    const sellerItemsMap = new Map();
-    savedOrder.items.forEach(item => {
-      const sellerId = item.sellerId.toString();
-      if (!sellerItemsMap.has(sellerId)) sellerItemsMap.set(sellerId, []);
-      sellerItemsMap.get(sellerId).push(item);
-    });
-
-    const buyerName = sanitizeHtml(user.personalInfo?.fullname || 'Buyer');
-    const orderTime = savedOrder.createdAt.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
-    const totalOrderPrice = savedOrder.totalAmount;
-
-    if (user.preferences?.emailNotifications) {
-      await withRetry(async () => {
-        const buyerEmailContent = generateOrderEmailBuyer(
-          buyerName,
-          savedOrder.items,
-          orderTime,
-          totalOrderPrice,
-          savedOrder.deliveryAddress,
-          savedOrder.orderId,
-          [...new Set(savedOrder.items.map(item => item.sellerId.toString()))],
-          null // No URL for STK Push; check phone for M-Pesa prompt
-        );
-        const buyerEmailSent = await sendEmail(user.personalInfo.email, 'Your Order Confirmation - BeiFity.Com', buyerEmailContent);
-        if (!buyerEmailSent) throw new Error('Failed to send buyer email');
-        logger.info(`Order confirmation email sent to buyer ${customerId}`, { orderId: savedOrder.orderId });
-      }, 3, `Send buyer email for order ${savedOrder.orderId}`);
-    } else {
-      logger.info(`Buyer ${customerId} has email notifications disabled`, { orderId: savedOrder.orderId });
-    }
-
-    const buyerNotificationContent = `Your order (ID: ${savedOrder.orderId}) has been placed. Check your phone for M-Pesa payment prompt.`;
+    // Send lightweight initiation notification to buyer only (full confirm on webhook)
+    const initNotificationContent = `Your order (ID: ${savedOrder.orderId}) has been placed. Check your phone for M-Pesa payment prompt. Reply "CANCEL" to abort before paying.`;
     try {
-      await sendNotification(customerId, 'order', buyerNotificationContent, customerId);
-      logger.info(`Order notification created for buyer ${customerId}`, { orderId: savedOrder.orderId });
+      await sendNotification(customerId, 'order', initNotificationContent, customerId);
+      logger.info(`Order initiation notification created for buyer ${customerId}`, { orderId: savedOrder.orderId });
     } catch (notificationError) {
-      logger.warn(`Failed to create buyer notification: ${notificationError.message}`, { orderId: savedOrder.orderId });
+      logger.warn(`Failed to create buyer initiation notification: ${notificationError.message}`, { orderId: savedOrder.orderId });
     }
 
-    for (const [sellerId, items] of sellerItemsMap) {
-      const seller = await userModel.findById(sellerId).session(session);
-      if (!seller || !seller.personalInfo?.email) {
-        logger.warn(`Failed to notify seller ${sellerId}: Seller not found or no email`, { orderId: savedOrder.orderId });
-        continue;
-      }
+    // No full emails or seller notifications here—defer to webhook for deduplication
 
-      if (seller.preferences?.emailNotifications) {
-        await withRetry(async () => {
-          const sellerName = sanitizeHtml(seller.personalInfo.fullname || 'Seller');
-          const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-          const sellerEmailContent = generateOrderEmailSeller(
-            sellerName,
-            buyerName,
-            items,
-            orderTime,
-            savedOrder.deliveryAddress,
-            totalPrice,
-            customerId,
-            savedOrder.orderId,
-            null // No URL; payment via M-Pesa
-          );
-          const sellerEmailSent = await sendEmail(seller.personalInfo.email, 'New Order for Your Product(s) - BeiFity.Com', sellerEmailContent);
-          if (!sellerEmailSent) throw new Error('Failed to send seller email');
-          logger.info(`Order email sent to seller ${sellerId}`, { orderId: savedOrder.orderId });
-        }, 3, `Send seller email for order ${savedOrder.orderId} to seller ${sellerId}`);
-      } else {
-        logger.info(`Seller ${sellerId} has email notifications disabled`, { orderId: savedOrder.orderId });
-      }
-
-      const sellerNotificationContent = `You have a new order (ID: ${savedOrder.orderId}) for ${items.map(i => sanitizeHtml(i.name)).join(', ')}. Wait for payment confirmation.`;
-      try {
-        await sendNotification(sellerId, 'order', sellerNotificationContent, customerId);
-        logger.info(`Order notification created for seller ${sellerId}`, { orderId: savedOrder.orderId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create seller notification: ${notificationError.message}`, { orderId: savedOrder.orderId, sellerId });
-      }
-    }
-
-    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
-    for (const admin of admins) {
-      const adminNotificationContent = `A new order (ID: ${savedOrder.orderId}) has been placed by ${buyerName} for a total of KES ${totalOrderPrice}. Payment is pending.`;
-      try {
-        await sendNotification(admin._id.toString(), 'order', adminNotificationContent, customerId);
-        logger.info(`Order notification created for admin ${admin._id}`, { orderId: savedOrder.orderId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create admin notification: ${notificationError.message}`, { orderId: savedOrder.orderId, adminId: admin._id });
-      }
-
-      if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
-        await withRetry(async () => {
-          const adminEmailContent = generateOrderEmailAdmin(
-            buyerName,
-            savedOrder.items,
-            orderTime,
-            totalOrderPrice,
-            savedOrder.deliveryAddress,
-            savedOrder.orderId,
-            customerId
-          );
-          const adminEmailSent = await sendEmail(admin.personalInfo.email, 'New Order Placed - BeiFity.Com Admin Notification', adminEmailContent);
-          if (!adminEmailSent) throw new Error('Failed to send admin email');
-          logger.info(`Order email sent to admin ${admin._id}`, { orderId: savedOrder.orderId });
-        }, 3, `Send admin email for order ${savedOrder.orderId} to admin ${admin._id}`);
-      } else {
-        logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId: savedOrder.orderId });
-      }
-    }
+    // Prepare poll URL for frontend
+    const apiBaseUrl = process.env.API_BASE_URL || req.protocol + '://' + req.get('host');
+    const pollUrl = `${apiBaseUrl}/api/payments/verify/${paymentResult.reference}`;
 
     logger.info(`Order placed successfully: ${savedOrder.orderId} by user ${requesterId}`);
     res.status(201).json({
       success: true,
       message: 'Order placed successfully. Check your phone for M-Pesa payment prompt.',
-      data: { order: savedOrder, authorization_url: null, reference: paymentResult.reference },
+      data: { 
+        order: savedOrder, 
+        authorization_url: null, 
+        reference: paymentResult.reference,
+        pollUrl: pollUrl,
+        nextAction: 'poll_payment'  // For frontend handling
+      },
     });
   } catch (error) {
     if (!transactionCommitted) {
@@ -432,7 +354,6 @@ export const retryOrderPayment = async (req, res) => {
     session.endSession();
   }
 }
-
 /**
  * Update Order Status
  * @route PATCH /api/orders/update-status
@@ -449,8 +370,10 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const { orderId, itemIndex, status, sellerId, userId, productId } = req.body;
+    const { orderId , itemIndex, status, sellerId, userId, productId } = req.body;
     const requesterId = req.user._id.toString();
+
+    console.log('Update request body:', req.body); // Log orderId, userId, etc.
 
     if (!orderId || itemIndex === undefined || !status || !sellerId || !userId || !productId) {
       logger.warn('Update order status failed: Missing required fields', { userId: requesterId, ip: req.ip });
@@ -472,6 +395,7 @@ export const updateOrderStatus = async (req, res) => {
       logger.warn(`Update order status failed: Order ${orderId} not found`, { userId, ip: req.ip });
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
+   console.log("Found the order",order.items[0].sellerId)
 
     const item = order.items[itemIndex];
     if (!item) {
@@ -482,8 +406,8 @@ export const updateOrderStatus = async (req, res) => {
       logger.warn(`Update order status failed: Item ${itemIndex} is cancelled`, { userId, orderId, ip: req.ip });
       return res.status(400).json({ success: false, message: 'Cannot update status of a cancelled item' });
     }
-
-    if (item.sellerId.toString() !== sellerId) {
+    console.log(item.sellerId._id.toString() === sellerId)
+    if (item.sellerId._id.toString() !== sellerId) {
       logger.warn(`Update order status failed: Seller ${sellerId} does not match item seller`, { userId, orderId, itemIndex, ip: req.ip });
       return res.status(403).json({ success: false, message: 'Seller does not match item seller' });
     }
@@ -511,11 +435,11 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: `Cannot transition from ${item.status} to ${status}` });
     }
 
-    if (['processing', 'shipped', 'out_for_delivery'].includes(status) && item.sellerId.toString() !== userId) {
+    if (['processing', 'shipped', 'out_for_delivery'].includes(status) && item.sellerId._id.toString() !== userId) {
       logger.warn(`Update order status failed: User ${userId} not authorized to set ${status} for item ${itemIndex}`, { orderId, ip: req.ip });
       return res.status(403).json({ success: false, message: `Only the seller can mark an item as ${status}` });
     }
-    if (status === 'delivered' && order.customerId.toString() !== userId) {
+    if (status === 'delivered' && order.customerId._id.toString() !== userId) {
       logger.warn(`Update order status failed: User ${userId} not authorized to mark item ${itemIndex} as delivered`, { orderId, ip: req.ip });
       return res.status(403).json({ success: false, message: 'Only the buyer can mark an item as delivered' });
     }
@@ -529,7 +453,7 @@ export const updateOrderStatus = async (req, res) => {
     } else if (itemStatuses.every(s => ['shipped', 'out_for_delivery', 'delivered'].includes(s) || s === 'cancelled')) {
       order.status = 'shipped';
     } else {
-      order.status = 'pending';
+      order.status = 'paid';
     }
 
     await order.save({ session });
@@ -539,19 +463,7 @@ export const updateOrderStatus = async (req, res) => {
     const buyerUpdate = {};
 
     if (status === 'delivered' && oldStatus !== 'delivered') {
-      sellerUpdate['stats.completedOrdersCount'] = 1;
-      sellerUpdate['analytics.salesCount'] = 1;
-      sellerUpdate['analytics.totalSales.amount'] = item.price * item.quantity * (1 - commissionRate);
-      sellerUpdate['stats.pendingOrdersCount'] = -1;
-      sellerUpdate['financials.balance'] = item.price * item.quantity * (1 - commissionRate);
-      buyerUpdate['stats.completedOrdersCount'] = 1;
-      buyerUpdate['stats.pendingOrdersCount'] = -1;
-      if (listing) {
-        listing.isSold = listing.inventory <= item.quantity;
-        await listing.save({ session });
-      }
-
-      const transaction = await TransactionModel.findOne({ orderId: order._id }).session(session);
+      const transaction = await TransactionModel.findOne({ orderId: order.orderId }).session(session);
       if (!transaction) {
         logger.warn(`Update order status failed: Transaction not found for order ${orderId}`, { userId, ip: req.ip });
         throw new Error('Transaction not found for order');
@@ -561,6 +473,17 @@ export const updateOrderStatus = async (req, res) => {
         logger.warn(`Update order status failed: Transaction item not found for item ${itemIndex}`, { userId, orderId, ip: req.ip });
         throw new Error('Transaction item not found');
       }
+      sellerUpdate['stats.completedOrdersCount'] = 1;
+      sellerUpdate['analytics.salesCount'] = 1;
+      sellerUpdate['analytics.totalSales.amount'] = transactionItem.sellerShare;
+      sellerUpdate['stats.pendingOrdersCount'] = -1;
+      buyerUpdate['stats.completedOrdersCount'] = 1;
+      buyerUpdate['stats.pendingOrdersCount'] = -1;
+      if (listing) {
+        listing.isSold = listing.inventory <= item.quantity;
+        await listing.save({ session });
+      }
+
       if (transactionItem.payoutStatus !== 'manual_pending') {
         logger.warn(`Payout already processed for item ${itemIndex}`, { userId, orderId, ip: req.ip });
       } else {
@@ -572,10 +495,10 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     if (Object.keys(sellerUpdate).length) {
-      await userModel.updateOne({ _id: item.sellerId }, { $inc: sellerUpdate }, { session });
+      await userModel.updateOne({ _id: item.sellerId._id }, { $inc: sellerUpdate }, { session });
     }
     if (Object.keys(buyerUpdate).length) {
-      await userModel.updateOne({ _id: order.customerId }, { $inc: buyerUpdate }, { session });
+      await userModel.updateOne({ _id: order.customerId._id }, { $inc: buyerUpdate }, { session });
     }
 
     const recipient = ['processing', 'shipped', 'out_for_delivery'].includes(status) ? order.customerId : item.sellerId;
@@ -655,17 +578,17 @@ export const updateOrderStatus = async (req, res) => {
       data: { orderId: order.orderId, items: order.items },
     });
   } catch (error) {
+    console.log(error)
     if (!transactionCommitted) {
       await session.abortTransaction();
-      logger.info(`Transaction aborted for order status update`, { userId: req.user?._id, orderId, itemIndex });
+      logger.info(`Transaction aborted for order status update`, { userId: req.user?._id, orderId: req.body.orderId, itemIndex: req.body.itemIndex });
     }
-    logger.error(`Error updating order status: ${error.message}`, { stack: error.stack, userId: req.user?._id, orderId, itemIndex });
+    logger.error(`Error updating order status: ${error.message}`, { stack: error.stack, userId: req.user?._id, orderId: req.body.orderId, itemIndex: req.body.itemIndex });
     return res.status(500).json({ success: false, message: `Server error: ${error.message}` });
   } finally {
     session.endSession();
   }
 };
-
 
 /**
  * Cancel Order Item
@@ -683,7 +606,7 @@ export const cancelOrderItem = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const { orderId, itemId, userId } = req.body;
+    const { orderId, itemId, userId , reason , details} = req.body;
     const requesterId = req.user._id.toString();
 
     if (!orderId || !itemId || !userId) {
@@ -691,7 +614,7 @@ export const cancelOrderItem = async (req, res) => {
       return res.status(400).json({ success: false, message: 'orderId, itemId, and userId are required' });
     }
 
-    if (requesterId !== userId) {
+    if (!requesterId) {
       logger.warn(`Cancel order item failed: User ${requesterId} attempted to cancel as ${userId}`, { ip: req.ip });
       return res.status(403).json({ success: false, message: 'Unauthorized to cancel this order' });
     }
@@ -725,8 +648,14 @@ export const cancelOrderItem = async (req, res) => {
       logger.warn(`Cancel order item failed: User ${userId} not authorized to cancel item ${itemId}`, { orderId, ip: req.ip });
       return res.status(403).json({ success: false, message: 'Only the buyer or seller can cancel this item' });
     }
+    if(!reason) {
+      logger.warn("Not sent the reason for cancellation and it should be there")
+      return res.status(403).json({success: false, message : "A reason required for cancellation" })
+    }
 
     item.cancelled = true;
+    item.cancellationReason = reason;
+    item.cancellationDetails= details;
     item.status = 'cancelled';
     item.refundedAmount = item.price * item.quantity;
 
@@ -734,8 +663,8 @@ export const cancelOrderItem = async (req, res) => {
     let refundStatus = 'none';
     let refundedAmount = 0;
 
-    if (order.swiftTransactionId) {
-      const transaction = await TransactionModel.findOne({ _id: order.swiftTransactionId }).session(session);
+    if (order.transactionId) {
+      const transaction = await TransactionModel.findOne({ _id: order.transactionId }).session(session);
       if (!transaction) {
         logger.warn(`Cancel order item failed: Transaction not found for order ${orderId}`, { userId, ip: req.ip });
         throw new Error('Transaction not found for order');
@@ -773,7 +702,7 @@ export const cancelOrderItem = async (req, res) => {
         } else {
           refundMessage = ` (refund will be processed as soon as possible)`;
           refundStatus = 'pending';
-          refundedAmount = item.price * item.quantity;
+          refundedAmount = transactionItem.itemAmount;
           item.refundStatus = 'pending';
           transactionItem.refundStatus = 'pending';
           transactionItem.refundedAmount = refundedAmount;
@@ -827,7 +756,7 @@ export const cancelOrderItem = async (req, res) => {
           item.name,
           orderId,
           item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
-          refundMessage.includes('refund') ? `A refund of KES ${item.price * item.quantity} will be processed as soon as possible.` : refundMessage,
+          refundMessage.includes('refund') ? `A refund of KES ${refundedAmount} will be processed as soon as possible.` : refundMessage,
           userId
         );
         const emailSent = await sendEmail(
@@ -870,7 +799,7 @@ export const cancelOrderItem = async (req, res) => {
             item.name,
             orderId,
             item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
-            refundMessage.includes('refund') ? `A refund of KES ${item.price * item.quantity} will be processed as soon as possible.` : refundMessage,
+            refundMessage.includes('refund') ? `A refund of KES ${refundedAmount} will be processed as soon as possible.` : refundMessage,
             userId
           );
           const adminEmailSent = await sendEmail(
@@ -913,6 +842,7 @@ export const cancelOrderItem = async (req, res) => {
   }
 };
 
+
 /**
  * Get Orders
  * @route POST /api/orders/get-orders
@@ -926,73 +856,75 @@ export const getOrders = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
 
-    const { userId } = req.body;
     const requesterId = req.user._id.toString();
 
-    if (requesterId !== userId && !req.user.personalInfo?.isAdmin) {
-      logger.warn(`Get orders failed: User ${requesterId} unauthorized to access orders for ${userId}`, { ip: req.ip });
-      return res.status(403).json({ success: false, message: 'Unauthorized to access these orders' });
+    if (!mongoose.Types.ObjectId.isValid(requesterId)) {
+      logger.warn(`Get orders failed: Invalid requesterId ${requesterId}`, { requesterId: requesterId, ip: req.ip });
+      return res.status(400).json({ success: false, message: 'Invalid requesterId' });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      logger.warn(`Get orders failed: Invalid userId ${userId}`, { userId: requesterId, ip: req.ip });
-      return res.status(400).json({ success: false, message: 'Invalid userId' });
-    }
+    const ObjectId = mongoose.Types.ObjectId;
+    const sellerObjectId = new ObjectId(requesterId);
 
     const orders = await orderModel
-      .find({ 'items.sellerId': userId })
-      .populate('customerId', 'personalInfo.fullname personalInfo.email')
+      .find({ 'items.sellerId': sellerObjectId })
+      .populate('customerId', 'personalInfo.fullname personalInfo.profilePicture') // Optional: Populate customer for easier frontend use
+      .sort({ createdAt: -1})
       .lean();
 
+    console.log('Raw orders fetched:', orders.length);
+    console.log(orders)
+
     if (!orders || orders.length === 0) {
-      logger.info(`No orders found for seller ${userId}`);
+      logger.info(`No orders found for seller ${requesterId}`);
       return res.status(200).json({ success: true, data: [], message: 'No orders found' });
     }
 
     const filteredOrders = orders.map(order => ({
-      orderId: sanitizeHtml(order.orderId),
-      customer: {
-        id: order.customerId._id,
-        fullname: sanitizeHtml(order.customerId.personalInfo.fullname || 'Unknown'),
-        email: sanitizeHtml(order.customerId.personalInfo.email || ''),
-      },
+      orderId: order.orderId,
+      customerId: order.customerId?._id || order.customerId, // Handle populated or raw
+      customerName: order.customerId?.personalInfo?.fullname || 'Unknown', // If populated
       totalAmount: order.totalAmount,
       deliveryFee: order.deliveryFee,
       status: order.status,
       items: order.items
-        .filter(item => item.sellerId.toString() === userId)
+        .filter(item => item.sellerId._id?.toString() === requesterId || item.sellerId === requesterId)
         .map(item => ({
           ...item,
-          _id: item._id.toString(),
-          name: sanitizeHtml(item.name),
-          productId: sanitizeHtml(item.productId),
-          color: sanitizeHtml(item.color),
+          _id: item._id?.toString() || null, // Handle lean() ObjectId
+          name: sanitizeHtml(item.name || ''),
+          productId: sanitizeHtml(item.productId || ''),
+          color: sanitizeHtml(item.color || ''),
           size: item.size ? sanitizeHtml(item.size) : undefined,
           status: item.status,
         })),
       deliveryAddress: {
-        country: sanitizeHtml(order.deliveryAddress.country),
-        county: sanitizeHtml(order.deliveryAddress.county || ''),
-        constituency: sanitizeHtml(order.deliveryAddress.constituency || ''),
-        nearestTown: sanitizeHtml(order.deliveryAddress.nearestTown || ''),
-        phone: sanitizeHtml(order.deliveryAddress.phone),
+        country: sanitizeHtml(order.deliveryAddress?.country || 'Kenya'),
+        county: sanitizeHtml(order.deliveryAddress?.county || ''),
+        constituency: sanitizeHtml(order.deliveryAddress?.constituency || ''),
+        nearestTown: sanitizeHtml(order.deliveryAddress?.nearestTown || ''),
+        phone: sanitizeHtml(order.deliveryAddress?.phone || ''),
       },
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
-    }));
+    })); // Only return orders with seller's items
 
-    logger.info(`Retrieved ${filteredOrders.length} orders for seller ${userId}`, { requesterId });
+    if (filteredOrders.length > 0) {
+      console.log('Sample item:', filteredOrders[0].items[0]);
+    }
+
+    logger.info(`Retrieved ${filteredOrders.length} orders for seller ${requesterId}`);
     return res.status(200).json({
       success: true,
       message: 'Orders retrieved successfully',
       data: filteredOrders,
     });
   } catch (error) {
-    logger.error(`Error fetching orders: ${error.message}`, { stack: error.stack, userId: req.user?._id });
+    console.error('Error in getOrders:', error);
+    logger.error(`Error fetching orders: ${error.message}`, { stack: error.stack, ip: req.ip });
     return res.status(500).json({ success: false, message: `Server error: ${error.message}` });
   }
 };
-
 /**
  * Get Buyer Orders
  * @route POST /api/orders/get-buyer-orders
@@ -1023,7 +955,6 @@ export const getBuyerOrders = async (req, res) => {
       .find({ customerId })
       .populate('items.sellerId', 'personalInfo.fullname personalInfo.email personalInfo.phone')
       .lean();
-    console.log(orders[orders.length - 1].items[0].sellerId.personalInfo);
     if (!orders || orders.length === 0) {
       logger.info(`No orders found for buyer ${customerId}`);
       return res.status(200).json({ success: true, data: [], message: 'No orders found for this buyer' });
@@ -1061,6 +992,8 @@ export const getBuyerOrders = async (req, res) => {
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
     }));
+
+    console.log(formattedOrders[0].items);
 
     logger.info(`Retrieved ${formattedOrders.length} orders for buyer ${customerId}`, { requesterId });
     return res.status(200).json({

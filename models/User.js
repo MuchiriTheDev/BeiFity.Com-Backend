@@ -172,7 +172,7 @@ const UserSchema = new mongoose.Schema(
           amount: { type: Number},
           date: { type: Date, default: Date.now },
           method: { type: String, enum: ['M-Pesa', 'Bank'] },
-          status: { type: String, enum: ['pending', 'completed', 'failed',"refunded"], default: 'pending' },
+          status: { type: String, enum: ['pending', 'manual_pending', 'completed', 'failed', 'refunded'], default: 'pending' }
         },
       ],
     },

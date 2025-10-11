@@ -12,13 +12,16 @@ import {
   generateTransactionReversalEmail,
   generateOrderEmailBuyer,
   generateOrderEmailSeller,
+  generateOrderEmailAdmin,  // Added missing import
 } from '../utils/Templates.js';
 import axios from 'axios';
 import { platform } from 'os';
 import { sendNotification } from './notificationController.js';
+import { calculateServiceFee } from '../utils/helper.js';
+import { listingModel } from '../models/Listing.js';
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
-const commissionRate = 0.05; // 5% platform commission
+const commissionRate = parseFloat(process.env.COMMISSION_RATE || '0'); // 5% platform commission
 const swift = axios.create({
   baseURL: process.env.SWIFT_BASE_URL || 'https://swiftwallet.co.ke/pay-app-v2/',
   headers: { 
@@ -45,110 +48,169 @@ const withRetry = async (fn, maxRetries, description) => {
   }
 };
 
+// Utility for transaction retries (add this to swiftController.js if not already present)
+const withTransactionRetry = async (fn, maxRetries = 5, operationName = 'webhook transaction') => {
+  let attempt = 1;
+  while (attempt <= maxRetries) {
+    const session = await mongoose.startSession({ defaultTransactionOptions: { timeout: 40000 } });
+    let transactionCommitted = false;
+    session.startTransaction();
+    try {
+      const result = await fn(session);
+      await session.commitTransaction();
+      transactionCommitted = true;
+      logger.info(`${operationName} succeeded on attempt ${attempt}`);
+      session.endSession();
+      return result;
+    } catch (error) {
+      if (!transactionCommitted) {
+        await session.abortTransaction();
+      }
+      session.endSession();
+
+      // Check for retryable WriteConflict or TransientTransactionError
+      if (error.name === 'MongoServerError' && 
+          (error.code === 112 || error.errorLabels?.includes('TransientTransactionError'))) {
+        logger.warn(`${operationName} failed with WriteConflict on attempt ${attempt}: ${error.message}. Retrying...`, { 
+          error: error.message, 
+          attempt,
+          maxRetries 
+        });
+        if (attempt === maxRetries) {
+          logger.error(`${operationName} failed after ${maxRetries} retries`, { error: error.message });
+          throw error;
+        }
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+        attempt++;
+      } else {
+        // Non-retryable error
+        logger.error(`${operationName} failed (non-retryable): ${error.message}`, { stack: error.stack });
+        throw error;
+      }
+    }
+  }
+};
+
 // Initialize Payment (SWIFT STK Push)
-export const initializePayment = async (orderId, session, email, deliveryFee) => {
+// Initialize Payment (SWIFT STK Push)
+export const initializePayment = async (orderIdObj, session, email, deliveryFee, phone) => {
   try {
-    const order = await orderModel.findById(orderId).session(session).populate('customerId', 'personalInfo.phone personalInfo.mobileMoneyDetails');
+    const order = await orderModel.findById(orderIdObj).session(session).populate('customerId', 'personalInfo.phone personalInfo.mobileMoneyDetails');
     if (!order) {
-      logger.error(`Order not found for payment initialization`, { orderId });
+      logger.error(`Order not found for payment initialization`, { orderId: orderIdObj });
       throw new Error('Order not found');
     }
     if (!order.items || !Array.isArray(order.items)) {
-      logger.error(`Order items missing or invalid`, { orderId });
+      logger.error(`Order items missing or invalid`, { orderId: orderIdObj });
       throw new Error('Order items are missing or invalid');
     }
 
+    // Calculate item total excluding cancelled items
     const itemTotal = order.items
       .filter(item => !item.cancelled)
       .reduce((sum, item) => sum + item.price * item.quantity, 0);
     if (Math.abs(order.totalAmount - (itemTotal + deliveryFee)) > 0.01) {
-      logger.error(`Total amount mismatch. Expected ${itemTotal + deliveryFee}, got ${order.totalAmount}`, { orderId });
+      logger.error(`Total amount mismatch. Expected ${itemTotal + deliveryFee}, got ${order.totalAmount}`, { orderId: orderIdObj });
       throw new Error('Total amount does not match item prices plus delivery fee');
     }
 
     // Get buyer's phone for STK Push
     let buyerPhone = order.customerId.personalInfo.mobileMoneyDetails?.phoneNumber || order.customerId.personalInfo.phone;
     if (!buyerPhone) {
-      logger.error(`Buyer phone not found for payment`, { orderId, customerId: order.customerId._id });
+      logger.error(`Buyer phone not found for payment`, { orderId: orderIdObj, customerId: order.customerId._id });
       throw new Error('Buyer phone number required for M-Pesa payment');
     }
-    // Format to Kenyan standard (254XXXXXXXXX)
-    if (buyerPhone.startsWith('0')) buyerPhone = '254' + buyerPhone.slice(1);
-    else if (buyerPhone.startsWith('+254')) buyerPhone = `0${buyerPhone.slice(4)}`;
-    console.log(buyerPhone)
-    
-    // Create Transaction (pre-save hook calculates shares/owed)
+
+    const finalPhone = phone ? phone.slice(1) : buyerPhone.slice(1); 
+    console.log('Final phone for STK:', finalPhone);
+
+    // Create Transaction (pre-save hook will calculate fees/shares)
     const transaction = new TransactionModel({
-      orderId: order.orderId,
+      orderId: order.orderId,  // Use string orderId
       totalAmount: order.totalAmount,
+      swiftServiceFee: calculateServiceFee(order.totalAmount),
       deliveryFee,
-      swiftReference:'1',
-      swiftServiceFee: 0, // Placeholder; from webhook
-      netReceived: order.totalAmount, // Placeholder
+      swiftReference: `PENDING-${Date.now()}`,  // Temporary; update after API response
       items: order.items
         .filter(item => !item.cancelled)
         .map(item => ({
-          itemId: item._id,
-          sellerId: item.sellerId._id,
+          itemId: item._id,  // Reference to order item's _id
+          sellerId: item.sellerId,
           itemAmount: item.price * item.quantity,
-          platformCommission: 0, // Placeholder; calculated in pre-save
-          netCommission: 0, // Placeholder; calculated in pre-save
-          sellerShare: item.price * item.quantity, // Placeholder; calculated in pre-
-          owedAmount: item.price * item.quantity, // Placeholder; calculated in pre-save
-          
+          cancelled: false,  // ADDED: Explicit for consistency
+          // Placeholders; pre-save hook fills platformCommission, sellerShare, etc.
+          platformCommission: 0,
+          sellerShare: 0,
+          transferFee: 0,
+          netCommission: 0,
+          owedAmount: 0,
+          payoutStatus: 'manual_pending',
+          deliveryConfirmed: false,
+          refundStatus: 'none',
+          refundedAmount: 0,
+          returnStatus: 'none',
         })),
-      status: 'swift_initiated',
+      status: 'pending',  // Initial status
       paymentMethod: 'M-Pesa',
     });
 
-    // Link to Order
-    await orderModel.findByIdAndUpdate(orderId, { swiftTransactionId: transaction._id }, { session });
+    // Save transaction temporarily
+    await transaction.save({ session });
 
-    // Call SWIFT API for STK Push
+    // Link transaction to order
+    await orderModel.findByIdAndUpdate(orderIdObj, { transactionId: transaction._id }, { session });
+
+    const phoneRegex = /^254[17]\d{8}$|^07[17]\d{8}$/;
+    if (!phoneRegex.test(finalPhone)) {
+      throw new Error(`Invalid phone format: ${finalPhone}. Expected 254XXXXXXXXX or 07XXXXXXXX.`);
+    }
+
+    // Prepare SWIFT API payload
     const swiftPayload = {
-      amount: Math.round(order.totalAmount), // Int KES, min 1
-      phone_number: buyerPhone,
-      channel_id: "000134" || undefined, // Optional
-      account_reference: `ORDER-${orderId}`,
+      amount: Math.round(order.totalAmount),  // Integer KES
+      phone_number: finalPhone,  // Use provided or buyer's
+      channel_id: process.env.SWIFT_CHANNEL_ID || "000146",  // From env if set
+      account_reference: `ORDER-${order.orderId}`,
       transaction_desc: `Payment for Order #${order.orderId}`,
-      callback_url: `${process.env.DOMAIN}/api/payments/webhook/swift`, // Your webhook endpoint
+      callback_url: `${process.env.DOMAIN || 'https://yourdomain.com'}/api/payments/webhook/swift`,
     };
-    
 
+    // Call SWIFT API
     const response = await withRetry(
       () => swift.post('/payments.php', swiftPayload),
       3,
-      `Initialize SWIFT payment for order ${orderId}`
+      `Initialize SWIFT payment for order ${order.orderId}`
     );
 
     const swiftData = response.data;
-    console.log('SWIFT Init Response:', swiftData);
+    console.log('SWIFT Init Response:', swiftData);  // Debug log
+
     if (!swiftData.success) {
-      // Rollback
+      // Rollback on failure
       await transaction.deleteOne({ session });
-      await orderModel.findByIdAndUpdate(orderId, { $unset: { swiftTransactionId: '' } }, { session });
-      logger.error(`SWIFT payment initialization failed: ${swiftData.message}`, { orderId, response: swiftData });
+      await orderModel.findByIdAndUpdate(orderIdObj, { $unset: { transactionId: '' } }, { session });
+      logger.error(`SWIFT payment initialization failed: ${swiftData.message}`, { orderId: order.orderId, response: swiftData });
       throw new Error(swiftData.message || 'Payment initiation failed');
     }
 
-    transaction.swiftReference = swiftData?.reference || transaction.swiftReference;
+    // Update transaction with real reference and status
+    transaction.swiftReference = swiftData.reference || swiftData.external_reference || transaction.swiftReference;
+    transaction.status = 'swift_initiated';
     await transaction.save({ session });
 
-
-    await transaction.save({ session });
-
-    logger.info(`SWIFT payment initialized for order ${orderId}`, { swiftReference: transaction.swiftReference });
+    logger.info(`SWIFT payment initialized for order ${order.orderId}`, { swiftReference: transaction.swiftReference });
     return {
       error: false,
-      authorization_url: null, // No URL; STK Push to phone
+      authorization_url: null,  // STK Push has no URL
       reference: transaction.swiftReference,
     };
   } catch (error) {
-    logger.error(`Error initializing payment: ${error.message}`, { stack: error.stack, orderId });
+    console.log('Payment init error:', error);
+    logger.error(`Error initializing payment: ${error.message}`, { stack: error.stack, orderId: orderIdObj });
     return { error: true, message: error.message };
   }
 };
-
 // Verify Transaction (for polling; real confirmation via webhook)
 export const verifyTransaction = async (reference) => {
   const session = await mongoose.startSession();
@@ -237,6 +299,7 @@ export const verifyTransactions = async (req, res) => {
     logger.info(`Transaction verified successfully via endpoint`, { reference });
     return res.status(200).json({ success: true, data: result.data });
   } catch (error) {
+    console.log('Verify endpoint error:', error);
     logger.error(`Error in verifyTransactions endpoint: ${error.message}`, { stack: error.stack, reference: req.params.reference });
     return res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -247,7 +310,7 @@ export const initiateRefund = async (orderId, itemId, session) => {
   try {
     logger.info("Started the manual refund process", { orderId, itemId });
     const order = await orderModel.findById(orderId).session(session).populate('items.sellerId customerId');
-    const transaction = await TransactionModel.findOne({ orderId }).session(session);
+    const transaction = await TransactionModel.findOne({ orderId: order.orderId }).session(session);
     if (!order || !transaction) {
       logger.error(`Order or transaction not found for refund`, { orderId, itemId });
       throw new Error('Order or transaction not found');
@@ -295,13 +358,13 @@ export const initiateRefund = async (orderId, itemId, session) => {
     );
     logger.info(`Seller ${transactionItem.sellerId} balance updated: -KES ${sellerShare} (manual refund pending)`, { orderId, itemId });
 
-    const platformCommission = transactionItem.platformCommission;
+    const platformShare = (transactionItem.itemAmount / transaction.totalAmount) * (transaction.swiftServiceFee + transaction.deliveryFee + (transactionItem.itemAmount * commissionRate));
     await userModel.findOneAndUpdate(
       { 'personalInfo.isAdmin': true },
-      { $inc: { 'financials.balance': -platformCommission } },
+      { $inc: { 'financials.balance': -platformShare } },
       { session }
     );
-    logger.info(`Admin balance updated: -KES ${platformCommission} (manual refund)`, { orderId, itemId });
+    logger.info(`Admin balance updated: -KES ${platformShare} (manual refund)`, { orderId, itemId });
 
     const isFullRefund = order.items.every(i => i.refundStatus === 'pending' || i.refundStatus === 'completed');
     const buyer = order.customerId;
@@ -394,7 +457,7 @@ export const initiatePayout = async (transactionId, itemId, session) => {
       throw new Error('Transaction not found');
     }
 
-    const order = await orderModel.findById(transaction.orderId).session(session).populate('items.sellerId');
+    const order = await orderModel.findOne({ orderId: transaction.orderId }).session(session).populate('items.sellerId');
     if (!order) {
       logger.error(`Order not found for payout`, { transactionId, itemId });
       throw new Error('Order not found');
@@ -428,36 +491,62 @@ export const initiatePayout = async (transactionId, itemId, session) => {
       throw new Error('Invalid total payout amount');
     }
 
-    if (seller.financials.balance < totalPayoutAmount) {
-      logger.error(`Insufficient balance for payout`, { sellerId, balance: seller.financials.balance, required: totalPayoutAmount });
-      throw new Error('Insufficient seller balance for payout');
+    // Find admin
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+    if (!admin) {
+      logger.error(`Admin not found for payout deduction`, { transactionId, itemId });
+      throw new Error('Admin not found');
     }
 
-    // Manual: Mark as transferred, update balances
+    // Manual: Mark as transferred
     for (const item of sellerItems) {
       item.payoutStatus = 'transferred';
       item.swiftPayoutReference = `MANUAL-${Date.now()}-${sellerId}`; // Track manual
     }
     await transaction.save({ session });
 
+    // Deduct from admin's balance (platform paying out)
+    await userModel.findByIdAndUpdate(
+      admin._id,
+      { $inc: { 'financials.balance': -totalPayoutAmount } },
+      { session }
+    );
+    logger.info(`Admin balance deducted: -KES ${totalPayoutAmount} for manual payout`, { transactionId, itemId });
+
+    // Push to admin's payoutHistory as outgoing (negative amount)
+    await userModel.findByIdAndUpdate(
+      admin._id,
+      {
+        $push: {
+          'financials.payoutHistory': {
+            amount: -totalPayoutAmount,
+            date: new Date(),
+            method: 'M-Pesa',
+            status: 'completed',
+          },
+        },
+      },
+      { session }
+    );
+    logger.info(`Outgoing payout recorded in admin history: -KES ${totalPayoutAmount}`, { transactionId, itemId });
+
+    // Push to seller's payoutHistory ONLY (no $inc balance—already added on payment)
     await userModel.findByIdAndUpdate(
       sellerId,
       {
-        $inc: { 'financials.balance': -totalPayoutAmount },
         $push: {
           'financials.payoutHistory': {
             amount: totalPayoutAmount,
+            date: new Date(),
             method: 'M-Pesa',
-            swiftTransferId: `MANUAL-${Date.now()}-${sellerId}`,
             status: 'completed',
-            orderId: transaction.orderId,
-            itemId: sellerItems.map(i => i.itemId),
           },
         },
       },
       { session }
     );
 
+    // Notify and email seller
     if (seller && seller.personalInfo?.email) {
       const emailContent = generatePayoutNotificationEmail(
         seller.personalInfo.fullname || 'Seller',
@@ -492,6 +581,35 @@ export const initiatePayout = async (transactionId, itemId, session) => {
       logger.warn(`Failed to create payout notification for seller ${seller._id}: ${notificationError.message}`, { transactionId, itemId });
     }
 
+    // Notify and email admin
+    if (admin && admin.personalInfo?.email) {
+      const adminEmailContent = `Manual payout of KES ${totalPayoutAmount.toFixed(2)} processed to seller "${sanitizeHtml(seller.personalInfo.fullname || 'Seller')}" for Order ID: ${sanitizeHtml(transaction.orderId)}. Balance deducted from platform account.`;
+      const adminEmailSent = await sendEmail(
+        admin.personalInfo.email,
+        'Manual Payout Processed - BeiFity.Com',
+        adminEmailContent
+      );
+      if (!adminEmailSent) {
+        logger.warn(`Failed to send payout notification email to admin ${admin._id}`, { transactionId, itemId });
+      } else {
+        logger.info(`Manual payout email sent to admin ${admin._id}`, { transactionId, itemId });
+      }
+    }
+
+    const adminNotificationContent = `Manual payout of KES ${totalPayoutAmount.toFixed(2)} processed to seller "${sanitizeHtml(seller.personalInfo.fullname || 'Seller')}" for Order ID: ${sanitizeHtml(transaction.orderId)}. Platform balance updated.`;
+    try {
+      await sendNotification(
+        admin._id.toString(),
+        'payout',
+        adminNotificationContent,
+        'system',
+        session
+      );
+      logger.info(`Manual payout notification created for admin ${admin._id}`, { transactionId, itemId });
+    } catch (notificationError) {
+      logger.warn(`Failed to create payout notification for admin ${admin._id}: ${notificationError.message}`, { transactionId, itemId });
+    }
+
     logger.info(`Manual payout processed for seller ${transactionItem.sellerId}: KES ${totalPayoutAmount}`, { transactionId, itemId });
     return { error: false, message: 'Manual payout processed successfully' };
   } catch (error) {
@@ -500,308 +618,496 @@ export const initiatePayout = async (transactionId, itemId, session) => {
   }
 };
 
-// {
-//   success: true,
-//   transaction_id: 5496,
-//   external_reference: 'INV-68da799130778',
-//   checkout_request_id: 'ws_CO_29092025152034401114672193',
-//   merchant_request_id: 'dc8a-4e1e-8306-658886b0d6d8935298',
-//   status: 'completed',
-//   timestamp: '2025-09-29T15:20:55+03:00',
-//   service_fee: 0,
-//   result: {
-//     ResultCode: 0,
-//     ResultDesc: 'The service request is processed successfully.',
-//     Amount: 10,
-//     MpesaReceiptNumber: 'TIT2J62SDV',
-//     Phone: 254114672193,
-//     TransactionDate: 20250929152054
-//   },
-//   channel_info: {
-//     channel_type: 'wallet',
-//     channel_name: "Muchiri's Payment Wallet",
-//     routing_description: 'STK Push to 0114672193 -> Wallet payment via collection channel (ID: 19) to wallet: WALLET-PAYMENT-00000061'
-//   }
-// }
 // Modified handleSwiftWebhook function
 export const handleSwiftWebhook = async (req, res) => {
-  const session = await mongoose.startSession();
-  let transactionCommitted = false;
-  session.startTransaction();
   console.log('Received SWIFT webhook:', req.body);
+  logger.info('SWIFT webhook received', { 
+    transaction_id: req.body.transaction_id, 
+    external_reference: req.body.external_reference, 
+    status: req.body.status 
+  });
   try {
-    const input = req.body;
-    const signature = req.headers['x-swiftwallet-signature'];
+    // Wrap core DB logic in retryable transaction
+    const txResult = await withTransactionRetry(async (session) => {
+      logger.debug('Starting webhook transaction processing', { external_reference: req.body.external_reference });
+      const input = req.body;
+      const signature = req.headers['x-swiftwallet-signature'];
 
-    // Verify HMAC signature
-    const webhookSecret = process.env.SWIFT_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(JSON.stringify(input))
-        .digest('hex');
-      if (!crypto.timingSafeEqual(Buffer.from(signature || ''), Buffer.from(expectedSignature))) {
-        logger.warn('Invalid webhook signature', { reference: input.transaction_id });
-        return res.status(401).send('Unauthorized');
+      // Verify HMAC signature
+      logger.debug('Verifying webhook signature', { hasSecret: !!process.env.SWIFT_WEBHOOK_SECRET });
+      const webhookSecret = process.env.SWIFT_WEBHOOK_SECRET;
+      if (webhookSecret) {
+        const expectedSignature = crypto
+          .createHmac('sha256', webhookSecret)
+          .update(JSON.stringify(input))
+          .digest('hex');
+        if (!crypto.timingSafeEqual(Buffer.from(signature || ''), Buffer.from(expectedSignature))) {
+          logger.warn('Invalid webhook signature', { reference: input.transaction_id });
+          throw new Error('Unauthorized');  // Non-retryable
+        }
+        logger.debug('Webhook signature verified successfully');
       }
-    }
 
-    const { transaction_id, external_reference, status, service_fee, result } = input;
+      const { transaction_id, external_reference, status, service_fee, result } = input;
 
-    const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
-    if (!transaction_id || status !== 'completed' || result.ResultCode !== 0) {
-      logger.warn(`Webhook invalid: status=${status}, code=${result.ResultCode}`, { transaction_id });
-    
-      const order = await orderModel.findOne({orderId : transaction?.orderId}).populate('items.sellerId customerId');
-      if (order) {
-        const buyer = order.customerId;
-        const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful. Please try again or contact support if the issue persists.`;
-        try {
-          await sendNotification( 
-            buyer._id.toString(),
-            'order',
-            buyerNotificationContent, 
-            null
-          );
-          await sendEmail(
-            buyer.personalInfo.email,
-            'Payment Failed - BeiFity.Com',
-            `Dear ${sanitizeHtml(buyer.personalInfo.fullname || 'Customer')},
-            
-            <br><br>Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful.
-              <a href="${FRONTEND_URL}/your-orders?orderId=${order.orderId}">View Details and Try Repayment</a> 
-            .Please try again or contact support if the issue persists.<br><br>Best regards,<br>BeiFity Team`
-          );
-          const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
-          if (admin && admin.personalInfo?.email) {
-            await sendEmail(
-              admin.personalInfo.email,
-              'Order Payment Failed - BeiFity.Com',
-              `Admin,<br><br>The payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) has failed. Please review the order and assist the customer if needed.<br><br>Best regards,<br>BeiFity System`
-            );
+      logger.debug('Checking webhook validity', { status, resultCode: result?.ResultCode });
+      if (!transaction_id || status !== 'completed' || result.ResultCode !== 0) {
+        logger.warn(`Webhook invalid: status=${status}, code=${result.ResultCode}`, { transaction_id });
+        
+        let order = null;  // FIXED: Declare outside with null fallback to avoid ReferenceError
+        
+        // Handle failure: Rollback order state (only if not already completed)
+        logger.debug('Processing webhook failure - rolling back order');
+        const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
+        if (transaction) {
+          if (transaction.status === 'completed') {
+            logger.info(`Duplicate failure webhook ignored for already-completed transaction ${external_reference}`);
+            return { type: 'duplicate' };  // Skip rollback for completed (idempotency)
           }
-          logger.info(`Failed payment notification created for buyer ${buyer._id}`, { orderId: order.orderId });
-        } catch (notificationError) {
-          logger.warn(`Failed to create failed payment notification: ${notificationError.message}`, { orderId: order.orderId });
+          logger.info(`Found transaction for rollback: ${transaction._id}`);
+          order = await orderModel.findOne({ orderId: transaction.orderId }).session(session).populate('items.sellerId customerId');
+          if (order) {
+            logger.info(`Found order for rollback: ${order._id}`);
+            // Restore inventory for non-cancelled items
+            for (const item of order.items.filter(i => !i.cancelled)) {
+              await listingModel.updateOne(
+                { 'productInfo.productId': item.productId },
+                { 
+                  $inc: { inventory: item.quantity, 'analytics.ordersNumber': -1 }, 
+                  $set: { isSold: false } 
+                },
+                { session }
+              );
+              logger.debug(`Restored inventory for item ${item.productId}`);
+            }
+            // Reset buyer stats
+            await userModel.updateOne(
+              { _id: order.customerId },
+              { 
+                $inc: { 'stats.pendingOrdersCount': -1, 'analytics.orderCount': -1 },
+                $pull: { orders: order._id }  // Remove from orders array
+              },
+              { session }
+            );
+            logger.debug(`Reset buyer stats for ${order.customerId}`);
+            // Reset seller pending counts
+            for (const item of order.items.filter(i => !i.cancelled)) {
+              await userModel.updateOne(
+                { _id: item.sellerId },
+                { $inc: { 'stats.pendingOrdersCount': -1 } },
+                { session }
+              );
+              logger.debug(`Reset seller pending count for ${item.sellerId}`);
+            }
+            // Delete transaction and unlink from order
+            await TransactionModel.deleteOne({ _id: transaction._id }, { session });
+            await orderModel.updateOne(
+              { _id: order._id },
+              { $unset: { transactionId: '' } },
+              { session }
+            );
+            // Delete order if no items left or fully cancelled (optional; keep for records)
+            await orderModel.deleteOne({ _id: order._id }, { session });
+            logger.info(`Rolled back and deleted order ${order.orderId}`);
+          } else {
+            logger.warn(`Transaction found but order not found for rollback`, { orderId: transaction.orderId });
+          }
+        } else {
+          logger.warn(`No transaction found for rollback`, { external_reference });
         }
 
-      transactionCommitted = true;
-      await session.commitTransaction();
-      return res.status(400).json({ success: false, message: 'Payment not completed' });
-      } else {
-        logger.warn(`Webhook: Order not found for failed transaction ${transaction_id}`);
-        transactionCommitted = true;
-        await session.commitTransaction();
-        return res.status(404).json({ success: false, message: 'Order not found for failed transaction' });
+        return { type: 'failure', order };  // Now safe: order is always defined (null if missing)
       }
-    }
-    console.log('Processing SWIFT webhook for transaction:', external_reference);
-   
-    if (!transaction) {
-      logger.warn(`Webhook: Transaction not found for ${transaction_id}`);
-      await session.commitTransaction();
-      transactionCommitted = true;
-      return res.status(404).json({ success: false, message: 'Transaction not found' });
-    }
+
+      console.log('Processing SWIFT webhook for transaction:', external_reference);
+      logger.info('Processing successful webhook', { external_reference, transaction_id });
+     
+      const transaction = await TransactionModel.findOne({ swiftReference: external_reference }).session(session);
+      if (!transaction) {
+        logger.warn(`Webhook: Transaction not found for ${transaction_id}`);
+        return { type: 'not_found' };
+      }
+      
+      // FIXED: Idempotency check for success webhooks - prevent re-processing completed transactions
+      if (transaction.status === 'completed') {
+        logger.info(`Duplicate webhook ignored for already-completed transaction ${external_reference}`);
+        return { type: 'duplicate' };
+      }
+      
+      console.log("Transactions: ",transaction)
+      logger.debug('Fetched transaction', { 
+        id: transaction._id, 
+        status: transaction.status, 
+        totalAmount: transaction.totalAmount,
+        itemsCount: transaction.items.length 
+      });
+
+      const order = await orderModel.findOne({ orderId: transaction.orderId }).session(session).populate('customerId items.sellerId');
+
+      if (!order) {
+        logger.warn(`Webhook: Order not found for transaction ${external_reference}`);
+        return { type: 'order_not_found' };
+      }
+      console.log('Order :', order)
+      logger.debug('Fetched order', { 
+        id: order._id, 
+        status: order.status, 
+        totalAmount: order.totalAmount,
+        itemsCount: order.items.length 
+      });
+
+      // Parse paidAt correctly
+      let paidAt = new Date();  // Fallback to now
+      if (result && result.TransactionDate) {
+        const tsStr = result.TransactionDate.toString().padStart(14, '0');  // Ensure 14 chars
+        if (tsStr.length === 14 && /^\d{14}$/.test(tsStr)) {
+          const year = parseInt(tsStr.slice(0, 4), 10);
+          const month = parseInt(tsStr.slice(4, 6), 10) - 1;  // JS months are 0-based
+          const day = parseInt(tsStr.slice(6, 8), 10);
+          const hour = parseInt(tsStr.slice(8, 10), 10);
+          const min = parseInt(tsStr.slice(10, 12), 10);
+          const sec = parseInt(tsStr.slice(12, 14), 10);
+          // Adjust for timezone if needed (SWIFT likely UTC; add +3h for EAT)
+          paidAt = new Date(year, month, day, hour, min, sec);
+          if (isNaN(paidAt.getTime())) {
+            logger.warn(`Invalid parsed TransactionDate: ${tsStr}, falling back to now`);
+            paidAt = new Date();
+          }
+        } else {
+          logger.warn(`Unexpected TransactionDate format: ${result.TransactionDate}`);
+        }
+      }
+      logger.debug('Parsed paidAt', { paidAt: paidAt.toISOString() });
+
+      // Update Transaction with final details
+      logger.debug('Updating transaction status to completed');
+      transaction.status = 'completed';
+      transaction.swiftServiceFee = service_fee || transaction.swiftServiceFee;
+      // FIXED: Calculate netReceived using itemsTotal (exclude delivery for commission/net)
+      const itemsTotal = transaction.items.reduce((sum, item) => sum + (item.itemAmount || 0), 0);
+      const commissionRate = parseFloat(process.env.COMMISSION_RATE || '0');
+      const platformCommission_total = itemsTotal * commissionRate;
+      transaction.netReceived = Math.max(itemsTotal - transaction.swiftServiceFee - platformCommission_total, 0);
+      transaction.paidAt = paidAt;
+      await transaction.save({ session });
+      logger.debug('Transaction saved after status update', { netReceived: transaction.netReceived, swiftServiceFee: transaction.swiftServiceFee });
 
 
-    if (!order) {
-      logger.warn(`Webhook: Order not found for transaction ${transaction_id}`);
-      await session.commitTransaction();
-      transactionCommitted = true;
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-    
+      // Update Order status to paid
+      if (order.status !== 'paid') {
+        logger.debug('Updating order status to paid');
+        order.status = 'paid';
+        await order.save({ session });
+        logger.info(`Order ${order.orderId} status updated to paid via webhook`, { transaction_id });
+      } else {
+        logger.debug('Order already in paid status, skipping update');
+      }
 
-    // Update Transaction
-    transaction.status = 'completed';
-    transaction.swiftServiceFee = service_fee || (transaction.totalAmount * parseFloat(process.env.SWIFT_FEE_RATE || 0.00));
-    transaction.netReceived = transaction.totalAmount - transaction.swiftServiceFee;
-    transaction.paidAt = new Date();
-    await transaction.save({ session });
+      console.log('Items Total:', itemsTotal); // User's log
+      console.log('Net For Sellers', transaction.netReceived); // User's log
+      logger.debug('Pre-calculation: itemsTotal', { itemsTotal, commissionRate, platformCommission_total });
 
-    // Update Order to paid
-    if (order.status !== 'paid') {
-      order.status = 'paid';
-      await order.save({ session });
-      logger.info(`Order ${order.orderId} status updated to paid via webhook`, { transaction_id });
-    }
+      for (const transactionItem of transaction.items.filter(item => !(item.cancelled ?? false))) { // Safe undefined check
+        const itemAmount = transactionItem.itemAmount || 0; // Safe
+        // FIXED: Prorate commission on itemsTotal only
+        const proratedCommission = itemsTotal > 0 ? (itemAmount / itemsTotal) * platformCommission_total : 0;
+        transactionItem.platformCommission = proratedCommission;
+        transactionItem.sellerShare = itemsTotal > 0 ? (itemAmount / itemsTotal) * transaction.netReceived : 0;
+        transactionItem.transferFee = 0;
+        transactionItem.netCommission = proratedCommission;
+        transactionItem.owedAmount = transactionItem.sellerShare;
+        console.log(`Seller ${transactionItem.sellerId} share calculated: KES ${transactionItem.sellerShare} (from total net ${transaction.netReceived}, item ${itemAmount}/${itemsTotal})`); // User's log
+        logger.debug('Item share calculated', { 
+          itemId: transactionItem.itemId, 
+          sellerId: transactionItem.sellerId, 
+          itemAmount, 
+          sellerShare: transactionItem.sellerShare, 
+          platformCommission: transactionItem.platformCommission 
+        });
+      }
 
-    // Update seller balances (no auto-payout; just record)
-    for (const transactionItem of transaction.items) {
-      const itemAmount = transactionItem.itemAmount;
-      const sellerShare = itemAmount * (1 - commissionRate);
-      await userModel.findByIdAndUpdate(
-        transactionItem.sellerId,
-        {
-          $inc: { 'financials.balance': sellerShare },
-          $push: {
-            'financials.payoutHistory': {
-              amount: sellerShare,
-              method: 'M-Pesa',
-              status: 'manual_pending',
-              
+      await transaction.save({ session });  // Save updated items
+      logger.debug('Transaction saved after item calculations', { itemsUpdated: true });
+
+      // FIXED: Platform takes commissions (on items) + delivery fee + swift fee
+      const totalPlatformCommission = transaction.items.reduce((sum, item) => sum + item.platformCommission, 0);
+      console.log("Total platform commission: ", totalPlatformCommission)
+      const platformBalance = transaction.swiftServiceFee + transaction.deliveryFee + totalPlatformCommission;
+      console.log("Platform Balance:", platformBalance)
+      console.log('After save, sellerShare:', transaction.items[0].sellerShare); // User's log - now 5!
+      logger.debug('Platform balance calculated', { totalPlatformCommission, platformBalance });
+
+      const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+      if (admin) {
+        await userModel.findByIdAndUpdate(
+          admin._id,
+          { $inc: { 'financials.balance': platformBalance } },
+          { session }
+        );
+        logger.info(`Platform (admin) balance updated: +KES ${platformBalance} (service ${transaction.swiftServiceFee} + delivery ${transaction.deliveryFee} + comm ${totalPlatformCommission})`, { orderId: order.orderId });
+      } else {
+        logger.warn('No admin user found for balance update');
+      }
+
+      // Update sellers' balance and analytics immediately after payment
+      // Group transaction items by seller for efficiency (use ObjectId for keys)
+      const sellerGroups = {};
+      for (const txItem of transaction.items.filter(item => !item.cancelled)) {
+        const sellerIdObj = txItem.sellerId;  // Keep as ObjectId
+        const sellerIdStr = sellerIdObj.toString();  // For grouping key
+        if (!sellerGroups[sellerIdStr]) {
+          sellerGroups[sellerIdStr] = { 
+            sellerIdObj: sellerIdObj, 
+            items: [], 
+            totalShare: 0, 
+            numItems: 0 
+          };
+        }
+        sellerGroups[sellerIdStr].items.push(txItem);
+        sellerGroups[sellerIdStr].totalShare += txItem.sellerShare;
+        sellerGroups[sellerIdStr].numItems += 1;
+      }
+      logger.debug('Seller groups formed', { groupCount: Object.keys(sellerGroups).length });
+
+      // For each seller group: Update balance, analytics, and push history (fetch listingId per item)
+      for (const [sellerIdStr, group] of Object.entries(sellerGroups)) {
+        logger.debug(`Processing seller group ${sellerIdStr}`, { totalShare: group.totalShare, numItems: group.numItems });
+        // Fetch listings for history (using productId from order items)
+        const historyEntries = [];
+        for (const txItem of group.items) {
+          const orderItem = order.items.find(oi => oi._id.toString() === txItem.itemId.toString());
+          if (orderItem) {
+            const listing = await listingModel.findOne({ 'productInfo.productId': orderItem.productId }).session(session);
+            historyEntries.push({
+              amount: txItem.sellerShare,
+              listingId: listing?._id || null,  // Use listing._id if found
+              date: paidAt,
+            });
+            logger.debug(`Added history entry for item ${orderItem.productId}`, { listingFound: !!listing });
+          }
+        }
+
+        const sellerIdObj = group.sellerIdObj;  // Use ObjectId for update
+        // Update seller: +totalShare to balance, +numItems to salesCount, +totalShare to totalSales.amount, push history
+        await userModel.findByIdAndUpdate(
+          sellerIdObj,
+          {
+            $inc: {
+              'financials.balance': group.totalShare,
+              'analytics.salesCount': group.numItems,
+              'analytics.totalSales.amount': group.totalShare,
+            },
+            $push: {
+              'analytics.totalSales.history': { $each: historyEntries },
             },
           },
-        },
-        { session }
-      );
-      logger.info(`Seller ${transactionItem.sellerId} balance updated: +KES ${sellerShare} (manual pending)`, { orderid: order.orderId, itemId: transactionItem.itemId });
-    }
-
-    // Platform commission + delivery
-    const platformCommission = transaction.items.reduce((sum, item) => sum + item.platformCommission, 0);
-    const platformBalance = platformCommission + transaction.deliveryFee;
-    await userModel.findOneAndUpdate(
-      { 'personalInfo.isAdmin': true },
-      { $inc: { 'financials.balance': platformBalance } },
-      { session }
-    );
-    logger.info(`Admin balance updated: +KES ${platformBalance} (commission + delivery fee)`, { orderId: order.orderId });
-
-    await session.commitTransaction();
-    transactionCommitted = true;
-    logger.info(`SWIFT webhook processed successfully`, { transaction_id, orderId: order._id });
-
-    // Full order confirmations and notifications (post-commit)
-    const buyer = order.customerId;
-    const orderTime = order.createdAt.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
-    const totalOrderPrice = order.totalAmount;
-    const buyerName = sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer');
-
-    // Buyer: Full order confirmation email and notification (payment confirmed)
-    if (buyer.preferences?.emailNotifications) {
-      await withRetry(async () => {
-        const buyerEmailContent = generateOrderEmailBuyer(
-          buyerName,
-          order.items,
-          orderTime,
-          totalOrderPrice,
-          order.deliveryAddress,
-          order.orderId,
-          [...new Set(order.items.map(item => item.sellerId.toString()))],
-          null // No URL for STK Push
-        ).replace('has been placed', 'payment has been confirmed and is now processing'); // Adjust template content for confirmation
-        const buyerEmailSent = await sendEmail(buyer.personalInfo.email, 'Order Confirmed - BeiFity.Com', buyerEmailContent);
-        if (!buyerEmailSent) throw new Error('Failed to send buyer confirmation email');
-        logger.info(`Order confirmation email sent to buyer ${buyer._id}`, { orderId: order.orderId });
-      }, 3, `Send buyer confirmation email for order ${order.orderId}`);
-    } else {
-      logger.info(`Buyer ${buyer._id} has email notifications disabled`, { orderId: order.orderId });
-    }
-    console.log("Buyer id", buyer._id.toString());
-    const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${totalOrderPrice}) has been confirmed. Processing will begin soon.`;
-    try {
-      await sendNotification(
-        buyer._id.toString(),
-        'order',
-        buyerNotificationContent,
-        null
-      );
-      logger.info(`Order confirmation notification created for buyer ${buyer._id}`, { orderId: order.orderId });
-    } catch (notificationError) {
-      logger.warn(`Failed to create buyer confirmation notification: ${notificationError.message}`, { orderId: order.orderId });
-    }
-
-// Sellers: New order emails and notifications (payment confirmed)
-const sellerItemsMap = new Map();
-order.items.forEach(item => {
-  // Get the actual seller ID string, not the populated object
-  const sellerId = item.sellerId._id ? item.sellerId._id.toString() : item.sellerId.toString();
-  if (!sellerItemsMap.has(sellerId)) sellerItemsMap.set(sellerId, []);
-  sellerItemsMap.get(sellerId).push(item);
-});
-
-for (const [sellerId, items] of sellerItemsMap) {
-  console.log('Notifying seller with ID:', sellerId); // Debug log
-  const seller = await userModel.findById(sellerId).session(session);
-  if (!seller || !seller.personalInfo?.email) {
-    logger.warn(`Failed to notify seller ${sellerId}: Seller not found or no email`, { orderId: order.orderId });
-    continue;
-  }
-
-  if (seller.preferences?.emailNotifications) {
-    await withRetry(async () => {
-      const sellerName = sanitizeHtml(seller.personalInfo.fullname || 'Seller');
-      const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-      const sellerEmailContent = generateOrderEmailSeller(
-        sellerName,
-        buyerName,
-        items,
-        orderTime,
-        order.deliveryAddress,
-        totalPrice,
-        buyer._id,
-        order.orderId,
-        null // No URL; payment via M-Pesa
-      ).replace('You have a new order', 'Payment confirmed for your new order');
-      const sellerEmailSent = await sendEmail(seller.personalInfo.email, 'New Order Confirmed - BeiFity.Com', sellerEmailContent);
-      if (!sellerEmailSent) throw new Error('Failed to send seller confirmation email');
-      logger.info(`Order confirmation email sent to seller ${sellerId}`, { orderId: order.orderId });
-    }, 3, `Send seller confirmation email for order ${order.orderId} to seller ${sellerId}`);
-  } else {
-    logger.info(`Seller ${sellerId} has email notifications disabled`, { orderId: order.orderId });
-  }
-
-  const sellerNotificationContent = `Payment confirmed for Order ID: ${sanitizeHtml(order.orderId)}. Your share (KES ${(items.reduce((sum, item) => sum + item.price * item.quantity, 0) * (1 - commissionRate)).toFixed(2)} est.) is pending manual payout after delivery for items: ${items.map(i => sanitizeHtml(i.name)).join(', ')}.`;
-  try {
-    await sendNotification(
-      sellerId, // This should now be the string ID
-      'order',
-      sellerNotificationContent,
-      buyer._id.toString()
-    );
-    logger.info(`Order confirmation notification created for seller ${sellerId}`, { orderId: order.orderId });
-  } catch (notificationError) {
-    logger.warn(`Failed to create seller confirmation notification: ${notificationError.message}`, { orderId: order.orderId, sellerId });
-  }
-}
-
-    // Admins: New paid order notifications and emails
-    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
-    for (const admin of admins) {
-      const adminNotificationContent = `A new order (ID: ${order.orderId}) has been placed and paid by ${buyerName} for a total of KES ${totalOrderPrice}.`;
-      try {
-        await sendNotification(
-          admin._id.toString(),
-          'order',
-          adminNotificationContent,
-          buyer._id.toString()
+          { session }
         );
-        logger.info(`Order confirmation notification created for admin ${admin._id}`, { orderId: order.orderId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create admin confirmation notification: ${notificationError.message}`, { orderId: order.orderId, adminId: admin._id });
+
+        logger.info(`Seller ${sellerIdStr} updated post-payment: +KES ${group.totalShare} to balance/analytics (${group.numItems} items, pending delivery)`, { orderId: order.orderId });
       }
 
-      if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
+      logger.info(`SWIFT webhook processed successfully`, { transaction_id, orderId: order.orderId, netReceived: transaction.netReceived, platformBalance });
+      return { type: 'success', order, transaction, paidAt };  // Return for post-processing
+    }, 5, 'SWIFT webhook transaction');
+
+    logger.debug('Webhook transaction completed', { type: txResult?.type });
+
+    // FIXED: Handle duplicate case to prevent re-processing
+    if (txResult.type === 'duplicate') {
+      logger.info('Duplicate webhook processed (skipped updates)');
+      return res.status(200).send('OK');
+    }
+
+    // Post-transaction processing (notifications/emails - outside retry, fire-and-forget)
+    if (txResult.type === 'failure' && txResult.order) {
+      const order = txResult.order;
+      const buyer = order.customerId;
+      logger.debug('Processing failure notifications', { orderId: order.orderId });
+      const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful. Please try again or contact support if the issue persists.`;
+      try {
+        await sendNotification( 
+          buyer._id.toString(),
+          'order',
+          buyerNotificationContent, 
+          null
+        );  // No session
+        await sendEmail(
+          buyer.personalInfo.email,
+          'Payment Failed - BeiFity.Com',
+          `Dear ${sanitizeHtml(buyer.personalInfo.fullname || 'Customer')},
+          
+          <br><br>Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) was not successful.
+            <a href="${FRONTEND_URL}/your-orders?orderId=${order.orderId}">View Details and Try Repayment</a> 
+          .Please try again or contact support if the issue persists.<br><br>Best regards,<br>BeiFity Team`
+        );
+        logger.info(`Failed payment notification created for buyer ${buyer._id}`, { orderId: order.orderId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create failed payment notification: ${notificationError.message}`, { orderId: order.orderId });
+      }
+
+      // Notify admin (no session)
+      const admin = await userModel.findOne({ 'personalInfo.isAdmin': true });
+      if (admin && admin.personalInfo?.email) {
+        await sendEmail(
+          admin.personalInfo.email,
+          'Order Payment Failed - BeiFity.Com',
+          `Admin,<br><br>The payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${order.totalAmount}) has failed. Please review the order and assist the customer if needed.<br><br>Best regards,<br>BeiFity System`
+        );
+        logger.info(`Failed payment email sent to admin ${admin._id}`);
+      }
+    } else if (txResult.type === 'success') {
+      const { order, transaction, paidAt } = txResult;
+      const buyer = order.customerId;
+      const orderTime = order.createdAt.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
+      const totalOrderPrice = order.totalAmount;
+      const buyerName = sanitizeHtml(buyer.personalInfo?.fullname || 'Buyer');
+      logger.debug('Processing success notifications', { orderId: order.orderId, buyerId: buyer._id });
+
+      // Buyer: Full confirmation email and notification
+      if (buyer.preferences?.emailNotifications) {
+        logger.debug('Sending buyer email');
         await withRetry(async () => {
-          const adminEmailContent = generateOrderEmailAdmin(
+          const buyerEmailContent = generateOrderEmailBuyer(
             buyerName,
-            order.items,
+            order.items.filter(item => !item.cancelled),
             orderTime,
             totalOrderPrice,
             order.deliveryAddress,
             order.orderId,
-            buyer._id
-          ).replace('has been placed', 'has been paid and confirmed'); // Adjust template for confirmation
-          const adminEmailSent = await sendEmail(admin.personalInfo.email, 'New Order Confirmed - BeiFity.Com Admin Notification', adminEmailContent);
-          if (!adminEmailSent) throw new Error('Failed to send admin confirmation email');
-          logger.info(`Order confirmation email sent to admin ${admin._id}`, { orderId: order.orderId });
-        }, 3, `Send admin confirmation email for order ${order.orderId} to admin ${admin._id}`);
+            [...new Set(order.items.filter(item => !item.cancelled).map(item => item.sellerId.toString()))],
+            null  // No URL
+          ).replace('has been placed', 'payment has been confirmed and is now processing');
+          const buyerEmailSent = await sendEmail(buyer.personalInfo.email, 'Order Confirmed - BeiFity.Com', buyerEmailContent);
+          if (!buyerEmailSent) throw new Error('Failed to send buyer confirmation email');
+          logger.info(`Order confirmation email sent to buyer ${buyer._id}`, { orderId: order.orderId });
+        }, 3, `Send buyer confirmation email for order ${order.orderId}`);
       } else {
-        logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId: order.orderId });
+        logger.info(`Buyer ${buyer._id} has email notifications disabled`, { orderId: order.orderId });
+      }
+
+      const buyerNotificationContent = `Your payment for Order ID: ${sanitizeHtml(order.orderId)} (KES ${totalOrderPrice}) has been confirmed. Processing will begin soon.`;
+      try {
+        await sendNotification(
+          buyer._id.toString(),
+          'order',
+          buyerNotificationContent,
+          null
+        );
+        logger.info(`Order confirmation notification created for buyer ${buyer._id}`, { orderId: order.orderId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create buyer confirmation notification: ${notificationError.message}`, { orderId: order.orderId });
+      }
+
+      // Sellers: Confirmation emails and notifications (grouped by seller)
+      const sellerItemsMap = new Map();
+      order.items.filter(item => !item.cancelled).forEach(item => {
+        const sellerId = item.sellerId._id ? item.sellerId._id.toString() : item.sellerId.toString();
+        if (!sellerItemsMap.has(sellerId)) sellerItemsMap.set(sellerId, []);
+        sellerItemsMap.get(sellerId).push(item);
+      });
+      logger.debug('Seller items map created', { sellerCount: sellerItemsMap.size });
+
+      for (const [sellerId, items] of sellerItemsMap) {
+        console.log('Notifying seller with ID:', sellerId);
+        logger.debug(`Processing notifications for seller ${sellerId}`, { itemCount: items.length });
+        const seller = await userModel.findById(new mongoose.Types.ObjectId(sellerId));  // Ensure ObjectId
+        if (!seller || !seller.personalInfo?.email) {
+          logger.warn(`Failed to notify seller ${sellerId}: Seller not found or no email`, { orderId: order.orderId });
+          continue;
+        }
+
+        if (seller.preferences?.emailNotifications) {
+          logger.debug(`Sending email to seller ${sellerId}`);
+          await withRetry(async () => {
+            const sellerName = sanitizeHtml(seller.personalInfo.fullname || 'Seller');
+            const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+            const sellerEmailContent = generateOrderEmailSeller(
+              sellerName,
+              buyerName,
+              items,
+              orderTime,
+              order.deliveryAddress,
+              totalPrice,
+              buyer._id,
+              order.orderId,
+              null
+            ).replace('You have a new order', 'Payment confirmed for your new order');
+            const sellerEmailSent = await sendEmail(seller.personalInfo.email, 'New Order Confirmed - BeiFity.Com', sellerEmailContent);
+            if (!sellerEmailSent) throw new Error('Failed to send seller confirmation email');
+            logger.info(`Order confirmation email sent to seller ${sellerId}`, { orderId: order.orderId });
+          }, 3, `Send seller confirmation email for order ${order.orderId} to seller ${sellerId}`);
+        } else {
+          logger.info(`Seller ${sellerId} has email notifications disabled`, { orderId: order.orderId });
+        }
+
+        const sellerShare = transaction.items
+          .filter(i => i.sellerId.toString() === sellerId)
+          .reduce((sum, i) => sum + i.sellerShare, 0);
+        const sellerNotificationContent = `Payment confirmed for Order ID: ${sanitizeHtml(order.orderId)}. Your share (KES ${sellerShare.toFixed(2)}) is pending after delivery for items: ${items.map(i => sanitizeHtml(i.name)).join(', ')}.`;
+        try {
+          await sendNotification(
+            sellerId,
+            'order',
+            sellerNotificationContent,
+            buyer._id.toString()
+          );
+          logger.info(`Order confirmation notification created for seller ${sellerId}`, { orderId: order.orderId });
+        } catch (notificationError) {
+          logger.warn(`Failed to create seller confirmation notification: ${notificationError.message}`, { orderId: order.orderId, sellerId });
+        }
+      }
+
+      // Admins: Confirmation notifications and emails
+      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences');
+      logger.debug('Fetched admins for notifications', { adminCount: admins.length });
+      for (const admin of admins) {
+        const adminNotificationContent = `A new order (ID: ${order.orderId}) has been placed and paid by ${buyerName} for a total of KES ${totalOrderPrice}.`;
+        try {
+          await sendNotification(
+            admin._id.toString(),
+            'order',
+            adminNotificationContent,
+            buyer._id.toString()
+          );
+          logger.info(`Order confirmation notification created for admin ${admin._id}`, { orderId: order.orderId });
+        } catch (notificationError) {
+          logger.warn(`Failed to create admin confirmation notification: ${notificationError.message}`, { orderId: order.orderId, adminId: admin._id });
+        }
+
+        if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
+          logger.debug(`Sending email to admin ${admin._id}`);
+          await withRetry(async () => {
+            const adminEmailContent = generateOrderEmailAdmin(
+              buyerName,
+              order.items.filter(item => !item.cancelled),
+              orderTime,
+              totalOrderPrice,
+              order.deliveryAddress,
+              order.orderId,
+              buyer._id
+            ).replace('has been placed', 'has been paid and confirmed');
+            const adminEmailSent = await sendEmail(admin.personalInfo.email, 'New Order Confirmed - BeiFity.Com Admin Notification', adminEmailContent);
+            if (!adminEmailSent) throw new Error('Failed to send admin confirmation email');
+            logger.info(`Order confirmation email sent to admin ${admin._id}`, { orderId: order.orderId });
+          }, 3, `Send admin confirmation email for order ${order.orderId} to admin ${admin._id}`);
+        } else {
+          logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId: order.orderId });
+        }
       }
     }
 
+    // Early returns for non-processing cases
+    if (txResult.type === 'not_found' || txResult.type === 'order_not_found') {
+      logger.info('Webhook processed (not found case)', { type: txResult.type });
+      return res.status(200).send('OK');
+    }
+
+    logger.info('Webhook fully processed successfully');
     return res.status(200).send('OK');
   } catch (error) {
     console.error('Error processing SWIFT webhook:', error);
-    if (!transactionCommitted) {
-      await session.abortTransaction();
-    }
     logger.error(`SWIFT webhook error: ${error.message}`, { stack: error.stack });
     return res.status(500).send('Internal Server Error');
-  } finally {
-    session.endSession();
   }
 };
