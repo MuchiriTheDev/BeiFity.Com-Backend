@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { listingModel } from './Listing.js';
+import { TransactionModel } from './Transaction.js';
 
 const itemSchema = new mongoose.Schema({
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -45,7 +46,7 @@ const orderSchema = new mongoose.Schema(
     deliveryFee: { type: Number, required: true, min: 0, default: 0 },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     swiftTransactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null }, // Parallel for migration
-    status: { type: String, enum: ['pending', 'paid', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'paid', 'processing', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
     items: [itemSchema],
     deliveryAddress: deliveryAddressSchema,
     reportCount: { type: Number, default: 0 },
@@ -62,14 +63,21 @@ orderSchema.pre('save', async function (next) {
     this.totalAmount = itemTotal + (this.deliveryFee || 0);
     const itemStatuses = this.items.map(item => item.status);
     const returnStatuses = this.items.map(item => item.returnStatus);
+    
+    // Check if order is paid via transaction
+    const transaction = await TransactionModel.findOne({ orderId: this.orderId });
+    const isPaid = transaction && transaction.status === 'completed';
+    
     if (itemStatuses.every(status => status === 'delivered') && returnStatuses.every(status => status === 'none')) {
       this.status = 'delivered';
-    } else if (itemStatuses.every(status => ['shipped', 'out_for_delivery', 'delivered'].includes(status)) && returnStatuses.every(status => status === 'none')) {
-      this.status = 'shipped';
     } else if (itemStatuses.every(status => status === 'cancelled') || returnStatuses.every(status => status === 'returned')) {
       this.status = 'cancelled';
+    } else if (itemStatuses.every(status => ['shipped', 'out_for_delivery', 'delivered'].includes(status)) && returnStatuses.every(status => status === 'none')) {
+      this.status = 'shipped';
+    } else if (itemStatuses.every(status => status === 'processing') && returnStatuses.every(status => status === 'none') && isPaid) {
+      this.status = 'processing';
     } else {
-      this.status = 'pending';  // Default to pending for new/unpaid orders
+      this.status = isPaid ? 'paid' : 'pending';
     }
     for (const item of this.items) {
       const listing = await listingModel.findOne({ 'productInfo.productId': item.productId });

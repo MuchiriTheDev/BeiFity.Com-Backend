@@ -153,7 +153,7 @@ export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice,
       <strong>Quantity:</strong> ${sanitizeHtml(String(item.quantity), sanitizeConfig)} <br>
       <strong>Price:</strong> KES ${sanitizeHtml(String(item.price), sanitizeConfig)} <br>
       <strong>Color:</strong> ${sanitizeHtml(item.color, sanitizeConfig)}${item.size ? ` <br><strong>Size:</strong> ${sanitizeHtml(item.size, sanitizeConfig)}` : ''}
-      <strong>Seller ID:</strong> ${sanitizeHtml(item.sellerId.toString(), sanitizeConfig)}
+      <strong>Seller ID:</strong> ${sanitizeHtml(item.sellerId._id.toString(), sanitizeConfig)}
     </p>
   `).join('<hr style="border: 1px solid #e5e7eb; margin: 10px 0;">');
 
@@ -161,7 +161,7 @@ export const generateOrderEmailBuyer = (buyerName, items, orderTime, totalPrice,
     <p style="font-size: 13px; color: #475569; margin: 10px 0;">
       <strong>Contact Seller(s):</strong><br>
       ${sellerIds.map(sellerId => `
-        <a href="${FRONTEND_URL}/chat/${sanitizeHtml(sellerId, sanitizeConfig)}" style="color: #1e40af; text-decoration: underline;">Chat with Seller ${sanitizeHtml(sellerId, sanitizeConfig)}</a><br>
+        <a href="${FRONTEND_URL}/chat/${sanitizeHtml(sellerId._id, sanitizeConfig)}" style="color: #1e40af; text-decoration: underline;">Chat with Seller ${sanitizeHtml(sellerId.personalInfo.fullname, sanitizeConfig)}</a><br>
       `).join('')}
     </p>
   ` : '';
@@ -254,7 +254,7 @@ export const generateOrderEmailAdmin = (buyerName, items, orderTime, totalPrice,
       <strong>Quantity:</strong> ${sanitizeHtml(String(item.quantity), sanitizeConfig)} <br>
       <strong>Price:</strong> KES ${sanitizeHtml(String(item.price), sanitizeConfig)} <br>
       <strong>Color:</strong> ${sanitizeHtml(item.color, sanitizeConfig)}${item.size ? ` <br><strong>Size:</strong> ${sanitizeHtml(item.size, sanitizeConfig)}` : ''} <br>
-      <strong>Seller:</strong> <a href="${FRONTEND_URL}/chat/${sanitizeHtml(item.sellerId.toString(), sanitizeConfig)}" style="color: #1e40af; text-decoration: underline;">${sanitizeHtml(item.sellerId.toString(), sanitizeConfig)}</a>
+      <strong>Seller:</strong> <a href="${FRONTEND_URL}/chat/${sanitizeHtml(item.sellerId._id.toString(), sanitizeConfig)}" style="color: #1e40af; text-decoration: underline;">${sanitizeHtml(item.sellerId.personalInfo.fullname.toString(), sanitizeConfig)}</a>
     </p>
   `).join('<hr style="border: 1px solid #e5e7eb; margin: 10px 0;">');
 
@@ -376,7 +376,7 @@ export const generateOrderStatusEmail = (recipientName, itemName, orderId, statu
                   <p style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 30px;">
                     Hi ${sanitizedRecipientName},<br>
                     The status of your order item "<strong>${sanitizedItemName}</strong>" (Order ID: ${sanitizedOrderId}) has been updated to <strong>${sanitizedStatus}</strong>.
-                    ${status === 'delivered' ? 'The seller has been paid via M-Pesa.' : status === 'shipped' ? 'Please confirm delivery once received.' : ''}
+                    ${status === 'delivered' ? 'The seller will be paid via M-Pesa.' : status === 'shipped' ? 'Please confirm delivery once received.' : ''}
                   </p>
                 </td>
               </tr>

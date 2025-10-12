@@ -429,9 +429,9 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     const statusFlow = {
-      pending: ['processing'],
-      processing: ['shipped'],
-      shipped: ['out_for_delivery'],
+      pending: ['processing', 'shipped'],
+      processing: ['shipped', 'out_for_delivery'],
+      shipped: ['out_for_delivery', 'delivered'],
       out_for_delivery: ['delivered'],
       delivered: [],
     };
@@ -619,7 +619,7 @@ export const cancelOrderItem = async (req, res) => {
       return res.status(400).json({ success: false, message: 'orderId, itemId, and userId are required' });
     }
 
-    if (!requesterId) {
+    if (requesterId !== userId) {
       logger.warn(`Cancel order item failed: User ${requesterId} attempted to cancel as ${userId}`, { ip: req.ip });
       return res.status(403).json({ success: false, message: 'Unauthorized to cancel this order' });
     }
@@ -737,86 +737,273 @@ export const cancelOrderItem = async (req, res) => {
       })),
     });
 
-    await userModel.updateOne(
-      { _id: order.customerId._id },
-      { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
-      { session }
-    );
-    await userModel.updateOne(
-      { _id: item.sellerId._id },
-      { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
-      { session }
-    );
+    // Restore inventory for the cancelled item
     await listingModel.updateOne(
       { 'productInfo.productId': item.productId },
       { $inc: { 'analytics.ordersNumber': -1, 'inventory': item.quantity }, $set: { isSold: false } },
       { session }
     );
 
-    const recipient = item.sellerId._id.toString() === userId ? order.customerId : item.sellerId;
-    if (recipient && recipient.personalInfo?.email && recipient.preferences?.emailNotifications) {
-      await withRetry(async () => {
-        const emailContent = generateOrderCancellationEmail(
-          recipient.personalInfo.fullname || (item.sellerId._id.toString() === userId ? 'Buyer' : 'Seller'),
-          item.name,
-          orderId,
-          item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
-          refundMessage.includes('refund') ? `A refund of KES ${refundedAmount} will be processed as soon as possible.` : refundMessage,
-          userId
-        );
-        const emailSent = await sendEmail(
-          recipient.personalInfo.email,
-          'Order Item Cancellation - BeiFity.Com',
-          emailContent
-        );
-        if (!emailSent) throw new Error(`Failed to send cancellation email to ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${recipient._id}`);
-        logger.info(`Cancellation email sent to ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${recipient._id}`, { orderId, itemId });
-      }, 3, `Send cancellation email for item ${itemId} in order ${orderId}`);
-    } else {
-      logger.info(`Recipient ${recipient._id} has email notifications disabled or no email`, { orderId, itemId });
-    }
+    // Update stats for the seller of this item (per item)
+    await userModel.updateOne(
+      { _id: item.sellerId._id },
+      { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
+      { session }
+    );
 
-    const notificationRecipientId = item.sellerId._id.toString() === userId ? order.customerId._id : item.sellerId._id;
-    const notificationRecipient = item.sellerId._id.toString() === userId ? order.customerId : item.sellerId;
-    const notificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
-    try {
-      await sendNotification(notificationRecipientId.toString(), 'order_cancellation', notificationContent, userId, session);
-      logger.info(`Cancellation notification created for ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, itemId });
-    } catch (notificationError) {
-      logger.warn(`Failed to create cancellation notification: ${notificationError.message}`, { orderId, itemId });
-    }
+    const allCancelled = savedOrder.items.every(i => i.cancelled);
 
-    // Notify admins of cancellation
-    const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
-    for (const admin of admins) {
-      const adminNotificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} (ID: ${userId}) cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
-      try {
-        await sendNotification(admin._id.toString(), 'order_cancellation', adminNotificationContent, userId, session);
-        logger.info(`Cancellation notification created for admin ${admin._id}`, { orderId, itemId });
-      } catch (notificationError) {
-        logger.warn(`Failed to create admin cancellation notification: ${notificationError.message}`, { orderId, itemId, adminId: admin._id });
+    let isFullCancellation = false;
+    if (allCancelled) {
+      savedOrder.status = 'cancelled';
+      await savedOrder.save({ session });
+
+      // Update buyer stats (per order)
+      await userModel.updateOne(
+        { _id: savedOrder.customerId._id },
+        { $inc: { 'stats.failedOrdersCount': 1, 'stats.pendingOrdersCount': -1 } },
+        { session }
+      );
+
+      // Adjust seller stats for all their items in this order (in case of multiple items per seller)
+      const sellerItemCounts = savedOrder.items.reduce((acc, i) => {
+        const sid = i.sellerId._id.toString();
+        acc[sid] = (acc[sid] || 0) + 1;
+        return acc;
+      }, {});
+      for (const [sid, count] of Object.entries(sellerItemCounts)) {
+        if (sid !== item.sellerId._id.toString()) {  // Skip current seller as already updated
+          await userModel.updateOne(
+            { _id: sid },
+            { $inc: { 'stats.failedOrdersCount': count, 'stats.pendingOrdersCount': -count } },
+            { session }
+          );
+        }
       }
 
-      if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
+      isFullCancellation = true;
+
+      // Full order refund logic
+      if (order.transactionId) {
+        const transaction = await TransactionModel.findById(order.transactionId).session(session);
+        if (transaction && transaction.status === 'completed' && !transaction.isReversed) {
+          transaction.isReversed = true;
+          await transaction.save({ session });
+
+          // Mark all transaction items as refunded
+          for (const txItem of transaction.items) {
+            txItem.refundStatus = 'pending';
+            txItem.refundedAmount = txItem.itemAmount;
+          }
+          await transaction.save({ session });
+
+          // Mark all order items as refunded
+          for (const it of savedOrder.items) {
+            it.refundStatus = 'pending';
+            it.refundedAmount = it.price * it.quantity;
+          }
+          await savedOrder.save({ session });
+
+          // Calculate full refund amount (total - service fee)
+          const fullRefundAmount = transaction.totalAmount - transaction.swiftServiceFee;
+
+          // Deduct from sellers' balances and add to history
+          const sellerDeductions = {};
+          for (const txItem of transaction.items) {
+            const share = txItem.sellerShare;
+            const sid = txItem.sellerId.toString();
+            sellerDeductions[sid] = (sellerDeductions[sid] || 0) + share;
+
+            await userModel.updateOne(
+              { _id: txItem.sellerId },
+              { $inc: { 'financials.balance': -share } },
+              { session }
+            );
+
+            await userModel.updateOne(
+              { _id: txItem.sellerId },
+              {
+                $push: {
+                  'financials.payoutHistory': {
+                    amount: -share,
+                    method: 'M-Pesa',
+                    status: 'manual_refund_pending',
+                  },
+                },
+              },
+              { session }
+            );
+          }
+
+          // Calculate and deduct platform share (delivery + commissions)
+          const itemsTotal = transaction.items.reduce((sum, i) => sum + i.itemAmount, 0);
+          const totalCommission = itemsTotal * commissionRate;
+          const platformDeduct = transaction.deliveryFee + totalCommission;
+          await userModel.updateOne(
+            { 'personalInfo.isAdmin': true },
+            { $inc: { 'financials.balance': -platformDeduct } },
+            { session }
+          );
+
+          // Full refund notifications and emails
+          const buyer = savedOrder.customerId;
+          const fullRefundMessage = `Full order cancelled. A full refund of KES ${fullRefundAmount.toFixed(2)} (excluding KES ${transaction.swiftServiceFee.toFixed(2)} service fee) will be processed as soon as possible.`;
+          if (buyer && buyer.personalInfo?.email && buyer.preferences?.emailNotifications) {
+            const emailContent = generateOrderCancellationEmail(
+              buyer.personalInfo.fullname || 'Buyer',
+              'Full Order',
+              orderId,
+              'buyer',
+              fullRefundMessage,
+              null
+            );
+            await sendEmail(
+              buyer.personalInfo.email,
+              'Full Order Cancellation - BeiFity.Com',
+              emailContent
+            );
+            logger.info(`Full cancellation email sent to buyer ${buyer._id}`, { orderId, itemId });
+          }
+          await sendNotification(
+            buyer._id.toString(),
+            'order_cancellation',
+            fullRefundMessage,
+            null,
+            session
+          );
+
+          // Sellers
+          for (const [sid, deduct] of Object.entries(sellerDeductions)) {
+            const seller = await userModel.findById(sid).session(session);
+            const sellerMsg = `Full order ${orderId} cancelled. KES ${deduct.toFixed(2)} has been deducted from your balance as part of the full refund (service fee retained by platform).`;
+            if (seller && seller.personalInfo?.email && seller.preferences?.emailNotifications) {
+              const emailContent = generateOrderCancellationEmail(
+                seller.personalInfo.fullname || 'Seller',
+                'Full Order',
+                orderId,
+                'seller',
+                sellerMsg,
+                null
+              );
+              await sendEmail(
+                seller.personalInfo.email,
+                'Full Order Cancellation - BeiFity.Com',
+                emailContent
+              );
+              logger.info(`Full cancellation email sent to seller ${sid}`, { orderId, itemId });
+            }
+            await sendNotification(
+              sid,
+              'order_cancellation',
+              sellerMsg,
+              savedOrder.customerId._id.toString(),
+              session
+            );
+          }
+
+          // Admins
+          const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
+          for (const admin of admins) {
+            const adminMsg = `Full order ${orderId} (initiated by ${userId === savedOrder.customerId._id.toString() ? 'buyer' : 'seller'}) has been cancelled. Full refund KES ${fullRefundAmount.toFixed(2)} initiated (service fee KES ${transaction.swiftServiceFee.toFixed(2)} retained).`;
+            await sendNotification(
+              admin._id.toString(),
+              'order_cancellation',
+              adminMsg,
+              userId,
+              session
+            );
+            if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
+              const emailContent = generateOrderCancellationEmailAdmin(
+                admin.personalInfo.fullname || 'Admin',
+                'Full Order',
+                orderId,
+                userId === savedOrder.customerId._id.toString() ? 'buyer' : 'seller',
+                adminMsg,
+                userId
+              );
+              await sendEmail(
+                admin.personalInfo.email,
+                'Full Order Cancellation - BeiFity.Com Admin Notification',
+                emailContent
+              );
+              logger.info(`Full cancellation admin email sent to ${admin._id}`, { orderId, itemId });
+            }
+          }
+
+          refundMessage = ` (full order cancelled, refund of KES ${fullRefundAmount.toFixed(2)} initiated excluding service fee)`;
+          refundedAmount = fullRefundAmount;
+          refundStatus = 'pending';
+        }
+      }
+    }
+
+    // Partial notifications (skip if full)
+    if (!isFullCancellation) {
+      const recipient = item.sellerId._id.toString() === userId ? order.customerId : item.sellerId;
+      if (recipient && recipient.personalInfo?.email && recipient.preferences?.emailNotifications) {
         await withRetry(async () => {
-          const adminEmailContent = generateOrderCancellationEmailAdmin(
-            admin.personalInfo.fullname || 'Admin',
+          const emailContent = generateOrderCancellationEmail(
+            recipient.personalInfo.fullname || (item.sellerId._id.toString() === userId ? 'Buyer' : 'Seller'),
             item.name,
             orderId,
             item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
             refundMessage.includes('refund') ? `A refund of KES ${refundedAmount} will be processed as soon as possible.` : refundMessage,
             userId
           );
-          const adminEmailSent = await sendEmail(
-            admin.personalInfo.email,
-            'Order Item Cancellation - BeiFity.Com Admin Notification',
-            adminEmailContent
+          const emailSent = await sendEmail(
+            recipient.personalInfo.email,
+            'Order Item Cancellation - BeiFity.Com',
+            emailContent
           );
-          if (!adminEmailSent) throw new Error('Failed to send admin cancellation email');
-          logger.info(`Cancellation email sent to admin ${admin._id}`, { orderId, itemId });
-        }, 3, `Send admin cancellation email for item ${itemId} in order ${orderId}`);
+          if (!emailSent) throw new Error(`Failed to send cancellation email to ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${recipient._id}`);
+          logger.info(`Cancellation email sent to ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${recipient._id}`, { orderId, itemId });
+        }, 3, `Send cancellation email for item ${itemId} in order ${orderId}`);
       } else {
-        logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId, itemId });
+        logger.info(`Recipient ${recipient?._id} has email notifications disabled or no email`, { orderId, itemId });
+      }
+
+      const notificationRecipientId = item.sellerId._id.toString() === userId ? order.customerId._id : item.sellerId._id;
+      const notificationRecipient = item.sellerId._id.toString() === userId ? order.customerId : item.sellerId;
+      const notificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
+      try {
+        await sendNotification(notificationRecipientId.toString(), 'order_cancellation', notificationContent, userId, session);
+        logger.info(`Cancellation notification created for ${item.sellerId._id.toString() === userId ? 'buyer' : 'seller'} ${notificationRecipientId}`, { orderId, itemId });
+      } catch (notificationError) {
+        logger.warn(`Failed to create cancellation notification: ${notificationError.message}`, { orderId, itemId });
+      }
+
+      // Notify admins of partial cancellation
+      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id personalInfo.email personalInfo.fullname preferences').session(session);
+      for (const admin of admins) {
+        const adminNotificationContent = `The ${item.sellerId._id.toString() === userId ? 'seller' : 'buyer'} (ID: ${userId}) cancelled the order item "${sanitizeHtml(item.name)}" (Order ID: ${sanitizeHtml(orderId)}). ${refundMessage}`;
+        try {
+          await sendNotification(admin._id.toString(), 'order_cancellation', adminNotificationContent, userId, session);
+          logger.info(`Cancellation notification created for admin ${admin._id}`, { orderId, itemId });
+        } catch (notificationError) {
+          logger.warn(`Failed to create admin cancellation notification: ${notificationError.message}`, { orderId, itemId, adminId: admin._id });
+        }
+
+        if (admin.personalInfo?.email && admin.preferences?.emailNotifications) {
+          await withRetry(async () => {
+            const adminEmailContent = generateOrderCancellationEmailAdmin(
+              admin.personalInfo.fullname || 'Admin',
+              item.name,
+              orderId,
+              item.sellerId._id.toString() === userId ? 'seller' : 'buyer',
+              refundMessage.includes('refund') ? `A refund of KES ${refundedAmount} will be processed as soon as possible.` : refundMessage,
+              userId
+            );
+            const adminEmailSent = await sendEmail(
+              admin.personalInfo.email,
+              'Order Item Cancellation - BeiFity.Com Admin Notification',
+              adminEmailContent
+            );
+            if (!adminEmailSent) throw new Error('Failed to send admin cancellation email');
+            logger.info(`Cancellation email sent to admin ${admin._id}`, { orderId, itemId });
+          }, 3, `Send admin cancellation email for item ${itemId} in order ${orderId}`);
+        } else {
+          logger.info(`Admin ${admin._id} has email notifications disabled or no email`, { orderId, itemId });
+        }
       }
     }
 
