@@ -37,7 +37,7 @@ const UserSchema = new mongoose.Schema(
       },
       profilePicture: {
         type: String,
-        default: 'https://gateway.pinata.cloud/ipfs/bafkreib6itxawtdtqjgf7y3riluof3jeqnlnp4qpav2slr2wt735aqshsu',
+        default: 'https://img.freepik.com/free-vector/blue-circle-with-white-user_78370-4707.jpg?semt=ais_hybrid&w=740&q=80',
       },
       phone: {
         type: String,
