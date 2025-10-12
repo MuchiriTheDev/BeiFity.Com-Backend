@@ -28,6 +28,7 @@ const deliveryAddressSchema = new mongoose.Schema({
   county: { type: String, required: true },
   constituency: { type: String, required: true },
   nearestTown: { type: String, required: true },
+  specificLocation: { type: String, default: ''},
   phone: { type: String, required: true },
 });
 

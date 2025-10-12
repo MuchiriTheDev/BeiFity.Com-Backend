@@ -188,6 +188,7 @@ export const placeOrder = async (req, res) => {
         county: sanitizeHtml(deliveryAddress.county),
         constituency: sanitizeHtml(deliveryAddress.constituency),
         nearestTown: sanitizeHtml(deliveryAddress.nearestTown),
+        specificLocation: sanitizeHtml(deliveryAddress.specificLocation || ''),
         phone: sanitizeHtml(deliveryAddress.phone),
       },
     };
