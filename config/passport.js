@@ -32,7 +32,7 @@ passport.use(
               email,
               password: hashedPlaceholderPassword, // No real password needed
               profilePicture: profile.photos[0]?.value || '',
-              phone: '+254712345678', // Default; prompt to update later
+              phone: "+25439393508", // Default; prompt to update later
               verified: true, // Google-verified
             },
             analytics: { lastActive: new Date() },
