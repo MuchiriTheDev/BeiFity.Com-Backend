@@ -1226,9 +1226,11 @@ export const transferGuestData = async (req, res) => {
 // Get Listings
 export const getListings = async (req, res) => {
   try {
-    // { verified: 'Verified',  isActive: true }
     const listings = await listingModel
-      .find()
+      .find({ 
+        'verified': 'Verified',
+        'isActive': true // Added the missing filter
+      })
       .select('-aiFindings -promoteUntil -inventory -shipingOptions -expiresAt -AgreedToTerms -updatedAt -__v')
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
@@ -1237,7 +1239,14 @@ export const getListings = async (req, res) => {
     res.status(200).json({ success: true, data: listings });
   } catch (error) {
     logger.error(`Error fetching listings: ${error.message}`, { stack: error.stack });
-    res.status(500).json({ success: false, message: 'Failed to fetch listings' });
+    
+    // More specific error response
+    const statusCode = error.name === 'CastError' ? 400 : 500;
+    const message = error.name === 'CastError' 
+      ? 'Invalid data format' 
+      : 'Failed to fetch listings';
+    
+    res.status(statusCode).json({ success: false, message });
   }
 };
 
