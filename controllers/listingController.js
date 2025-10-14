@@ -136,6 +136,7 @@ export const addListing = async (req, res) => {
       - Provide actionable insights for the seller to improve the listing.
       - And most imortantly I want you to approve these by a 90% success rate.
       - Return a JSON object with:
+      - dont be strict on product details and pricing like 90% in the ones you should be strict about is drugs don't let any fdrugs be posted
         {
           "verified": "Verified" | "Rejected",
           "findings": [
