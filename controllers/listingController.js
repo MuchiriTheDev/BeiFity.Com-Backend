@@ -198,7 +198,7 @@ export const addListing = async (req, res) => {
     listingData.aiFindings = aiResponse.findings;
 
     const listing = new listingModel(listingData);
-    await listing.save({ session });
+   const savedListing =  await listing.save({ session });
 
     await userModel.findByIdAndUpdate(
       req.user._id,
@@ -243,7 +243,7 @@ export const addListing = async (req, res) => {
     logger.info(`Listing created by user ${userId}: ${productId}, AI verification: ${aiResponse.verified}`);
     res.status(201).json({
       success: true,
-      message: `Listing ${aiResponse.verified.toLowerCase()}${aiResponse.verified === 'Verified' ? ' and is now live' : ', please review findings'}`,
+      message: `Listing ${aiResponse.verified.toLowerCase()}${aiResponse.verified === 'Verified' ? ' and is now live' : `, due to ${aiResponse.findings[0].title}`}`,
       data: { listing, aiFindings: aiResponse.findings },
     });
   } catch (error) {
