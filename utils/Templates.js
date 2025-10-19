@@ -880,29 +880,35 @@ export const generateMarketingEmail = (recipientName, products) => {
       const sanitizedProductName = sanitizeHtml(capitalizeWords(product.name), sanitizeConfig);
       const sanitizedPrice = sanitizeHtml(product.price.toFixed(2), sanitizeConfig);
       const sanitizedDescription = sanitizeHtml(product.description.slice(0, 100) + (product.description.length > 100 ? '...' : ''), sanitizeConfig);
-      const sanitizedImage = sanitizeHtml(product.image || 'https://via.placeholder.com/300', sanitizeConfig);
+      const sanitizedImage = sanitizeHtml(product.image || 'https://via.placeholder.com/300x300/ffffff/cccccc?text=No+Image', sanitizeConfig);
       const sanitizedProductUrl = sanitizeHtml(product.url, { ...sanitizeConfig, allowedSchemes: ['https'] });
 
       return `
         <tr>
-          <td style="padding: 16px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1); transition: transform 0.3s ease;">
+          <td style="padding: 0 0 24px 0;">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" class="product-table" style="background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border: 1px solid #e2e8f0;">
               <tr>
                 <td style="position: relative; text-align: center; padding: 0;">
-                  <div style="position: relative; overflow: hidden; border-radius: 16px 16px 0 0;">
-                    <img src="${sanitizedImage}" alt="${sanitizedProductName}" style="width: 100%; max-width: 300px; height: auto; display: block; margin: 0 auto; transition: transform 0.3s ease;">
-                    <span style="position: absolute; top: 12px; right: 12px; background: linear-gradient(90deg, #10b981, #34d399); color: #ffffff; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);">In Stock</span>
+                  <div style="position: relative; overflow: hidden; border-radius: 12px 12px 0 0; background: #f8fafc; padding: 24px 0;">
+                    <img src="${sanitizedImage}" alt="${sanitizedProductName}" style="width: 100%; max-width: 100%; height: auto; display: block; margin: 0 auto;" width="300" height="300">
+                    <span style="position: absolute; top: 16px; right: 16px; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.5px;">In Stock</span>
                   </div>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 20px; text-align: center;">
-                  <h3 style="font-size: 22px; font-weight: 700; color: #1e3a8a; margin: 0 0 10px; line-height: 1.3;">${sanitizedProductName}</h3>
-                  <p style="font-size: 20px; font-weight: 700; color: #e11d48; margin: 0 0 10px;">KES ${sanitizedPrice}</p>
-                  <p style="font-size: 15px; color: #475569; line-height: 1.5; margin: 0 0 16px;">${sanitizedDescription}</p>
-                  <a href="${sanitizedProductUrl}" style="display: inline-block; background: linear-gradient(90deg, #1e40af, #60a5fa); color: #ffffff; font-size: 16px; font-weight: 600; padding: 12px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease;">
-                    Shop Now
-                  </a>
+                <td style="padding: 24px 20px; text-align: left;">
+                  <h3 style="font-size: 20px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; line-height: 1.3;">${sanitizedProductName}</h3>
+                  <p style="font-size: 18px; font-weight: 700; color: #dc2626; margin: 0 0 12px 0; line-height: 1.2;">KES ${sanitizedPrice}</p>
+                  <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">${sanitizedDescription}</p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="text-align: right;">
+                        <a href="${sanitizedProductUrl}" style="display: inline-block; background: #3b82f6; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 24px; text-decoration: none; border-radius: 8px; transition: background-color 0.2s ease;">
+                          Shop Now
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -918,76 +924,147 @@ export const generateMarketingEmail = (recipientName, products) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Exclusive Deals Await at BeiFity.Com!</title>
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta name="x-apple-disable-message-reformatting">
+      <meta name="color-scheme" content="light dark">
+      <meta name="supported-color-schemes" content="light dark">
+      <title>Exclusive Deals Await at BeiFity.Com</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
-        body { font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background: #f0f2f5 url('https://www.transparenttextures.com/patterns/soft-wallpaper.png'); }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { 
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+          margin: 0; 
+          padding: 0; 
+          background: #f8fafc; 
+          -webkit-text-size-adjust: 100%;
+          -ms-text-size-adjust: 100%;
+          color: #1e293b;
+        }
+        table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
         .container { max-width: 600px; margin: 0 auto; }
-        a:hover { transform: scale(1.05); background: #1e3a8a !important; }
-        .product-table:hover { transform: translateY(-4px); }
-        img { max-width: 100%; height: auto; }
-        .social-icon { transition: transform 0.3s ease; }
-        .social-icon:hover { transform: scale(1.1); }
+        .button { display: inline-block; text-decoration: none; }
+        .button:hover { opacity: 0.9; }
+        .product-table:hover { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); transform: translateY(-1px); transition: all 0.2s ease; }
+        img { max-width: 100%; height: auto; border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+        .social-icon { display: inline-block; margin: 0 8px; width: 32px; height: 32px; border-radius: 50%; transition: transform 0.2s ease; }
+        .social-icon:hover { transform: scale(1.05); }
+        .preheader { display: none !important; max-height: 0; overflow: hidden; color: #64748b; font-size: 1px; line-height: 1px; }
+        /* Dark Mode */
+        @media (prefers-color-scheme: dark) {
+          body { background: #0f172a; color: #f1f5f9; }
+          .container { background: #1e293b; }
+          .product-table { background: #334155; border-color: #475569; }
+          .hero { background: linear-gradient(135deg, #1e40af, #1d4ed8); }
+          .cta-section { background: #334155; }
+          .footer { background: #0f172a; color: #94a3b8; }
+          .footer a { color: #60a5fa; }
+        }
+        /* Responsive Styles */
         @media only screen and (max-width: 600px) {
-          .container { max-width: 100% !important; padding: 10px !important; }
-          .hero img { max-width: 80% !important; }
-          .hero h1 { font-size: 24px !important; }
-          .hero p { font-size: 16px !important; }
-          .product-table img { max-width: 90% !important; }
-          .stock-badge { position: static !important; display: inline-block; margin: 10px auto !important; }
+          .container { width: 100% !important; padding: 0 16px !important; }
+          .hero { padding: 32px 20px !important; }
+          .hero h1 { font-size: 24px !important; line-height: 1.2 !important; }
+          .hero p { font-size: 16px !important; line-height: 1.4 !important; }
+          .hero .button { padding: 12px 24px !important; font-size: 15px !important; }
+          .product-table { margin: 0 !important; width: 100% !important; }
+          .product-content { padding: 20px 16px !important; text-align: center !important; }
+          .product-name { font-size: 18px !important; margin-bottom: 8px !important; }
+          .product-price { font-size: 18px !important; margin-bottom: 8px !important; }
+          .product-desc { font-size: 14px !important; margin-bottom: 16px !important; text-align: center !important; }
+          .product-button { padding: 10px 20px !important; font-size: 14px !important; }
+          .stock-badge { position: static !important; display: block !important; margin: 12px auto 0 !important; transform: none !important; }
+          .cta-button { padding: 12px 24px !important; font-size: 15px !important; }
+          .footer { padding: 24px 16px !important; }
+          .footer-text { font-size: 13px !important; line-height: 1.4 !important; }
+        }
+        @media only screen and (max-width: 480px) {
+          .hero h1 { font-size: 20px !important; }
+          .hero p { font-size: 14px !important; }
+          .product-name { font-size: 16px !important; }
+          .product-price { font-size: 16px !important; }
+          .product-desc { font-size: 13px !important; }
+          .header-logo { height: 48px !important; }
         }
       </style>
     </head>
-    <body style="background: #f0f2f5 url('https://www.transparenttextures.com/patterns/soft-wallpaper.png');">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+    <body style="margin: 0; padding: 0; background: #f8fafc;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 0;">
         <tr>
-          <td align="center">
-            <table role="presentation" class="container" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12); overflow: hidden;">
+          <td class="preheader" style="padding: 20px 0; font-size: 1px; line-height: 1px;">Discover exclusive deals tailored just for you at BeiFity.Com – your go-to for premium shopping in Nairobi.</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding: 40px 20px 0;">
+            <table role="presentation" class="container" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); overflow: hidden; border: 1px solid #e2e8f0;">
               <!-- Header -->
               <tr>
-                <td style="padding: 20px; text-align: center; background: #ffffff;">
-                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 60px; display: block; margin: 0 auto;">
+                <td style="padding: 24px 24px 0; text-align: center; background: #ffffff;">
+                  <a href="${FRONTEND_URL}" style="text-decoration: none;">
+                    <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" class="header-logo" style="width: auto; height: 56px; display: block; margin: 0 auto;" width="160" height="56">
+                  </a>
                 </td>
               </tr>
               <!-- Hero Section -->
               <tr>
-                <td class="hero" style="background: linear-gradient(135deg, #1e40af, #60a5fa); padding: 40px 20px; text-align: center;">
-                  <h1 style="font-size: 28px; font-weight: 700; color: #ffffff; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">Hey ${sanitizedRecipientName}!</h1>
-                  <p style="font-size: 18px; color: #e2e8f0; line-height: 1.5; margin: 0 0 20px;">Your exclusive deals are here! Shop the best at <span style="color: #fbbf24;">BeiFity</span>!</p>
-                  <a href="${FRONTEND_URL}/collection" style="display: inline-block; background: linear-gradient(90deg, #fbbf24, #f59e0b); color: #1e293b; font-size: 16px; font-weight: 600; padding: 14px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease;">
-                    Discover Now
+                <td class="hero" style="background: linear-gradient(135deg, #3b82f6, #60a5fa); padding: 40px 24px; text-align: center; color: #ffffff;">
+                  <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 8px 0; line-height: 1.3;">Hello, ${sanitizedRecipientName}!</h1>
+                  <p style="font-size: 18px; line-height: 1.6; margin: 0 0 24px 0;">Unlock exclusive deals and elevate your style with BeiFity's curated collection.</p>
+                  <a href="${FRONTEND_URL}/collection" class="button" style="display: inline-block; background: #fbbf24; color: #1e293b; font-size: 16px; font-weight: 600; padding: 14px 28px; text-decoration: none; border-radius: 8px;">
+                    Explore Collection
                   </a>
+                </td>
+              </tr>
+              <!-- Products Section Header -->
+              <tr>
+                <td style="padding: 32px 24px 16px; text-align: center;">
+                  <h2 style="font-size: 24px; font-weight: 600; color: #1e293b; margin: 0 0 4px 0; line-height: 1.3;">Featured Deals</h2>
+                  <p style="font-size: 16px; color: #64748b; margin: 0; line-height: 1.5;">Handpicked just for you</p>
                 </td>
               </tr>
               <!-- Products -->
               <tr>
-                <td style="padding: 20px 20px 30px;">
+                <td style="padding: 0 24px 32px;">
                   <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                     ${productCards}
                   </table>
                 </td>
               </tr>
-              <!-- CTA -->
+              <!-- CTA Section -->
               <tr>
-                <td style="padding: 20px; text-align: center; background: #f8fafc;">
-                  <a href="${FRONTEND_URL}/collection" style="display: inline-block; background: linear-gradient(90deg, #1e40af, #60a5fa); color: #ffffff; font-size: 16px; font-weight: 600; padding: 14px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease; text-transform: uppercase;">
-                    Explore More Deals
+                <td class="cta-section" style="padding: 32px 24px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+                  <h3 style="font-size: 20px; font-weight: 600; color: #1e293b; margin: 0 0 12px 0; line-height: 1.3;">Ready to Shop More?</h3>
+                  <a href="${FRONTEND_URL}/collection" class="button cta-button" style="display: inline-block; background: #3b82f6; color: #ffffff; font-size: 16px; font-weight: 600; padding: 14px 28px; text-decoration: none; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    View All Deals
                   </a>
                 </td>
               </tr>
               <!-- Footer -->
               <tr>
-                <td style="padding: 30px 20px; text-align: center; background: linear-gradient(135deg, #f8fafc, #e5e7eb); border-radius: 0 0 20px 20px;">
-                 
-                  <p style="font-size: 14px; color: #475569; margin: 0 0 8px;">
-                    <a href="${FRONTEND_URL}/edit-profile" style="color: #1e40af; text-decoration: underline;">Unsubscribe</a> from these emails.
+                <td class="footer" style="padding: 32px 24px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b;">
+                  <p style="font-size: 14px; margin: 0 0 12px 0; line-height: 1.5;">
+                    <a href="${FRONTEND_URL}/unsubscribe" style="color: #3b82f6; text-decoration: none; font-weight: 500;">Unsubscribe</a> | 
+                    <a href="${FRONTEND_URL}/privacy" style="color: #3b82f6; text-decoration: none; font-weight: 500;">Privacy Policy</a>
                   </p>
-                  <p style="font-size: 14px; color: #475569; margin: 0 0 8px;">
-                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>
+                  <p style="font-size: 14px; margin: 0 0 16px 0; line-height: 1.5;">
+                    BeiFity.Com | P.O. Box 12345, Nairobi, Kenya | <a href="mailto:support@beifity.com" style="color: #3b82f6; text-decoration: none;">support@beifity.com</a>
                   </p>
-                  <p style="font-size: 14px; color: #475569; margin: 0;">
-                    <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity</span>.Com</span> © ${new Date().getFullYear()}
+                  <p style="font-size: 14px; margin: 0 0 20px 0; line-height: 1.5;">
+                    <span style="color: #1e293b; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity</span>.Com</span> © ${new Date().getFullYear()} All rights reserved.
                   </p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="text-align: center;">
+                        <a href="https://facebook.com/beifity" class="social-icon" style="background: #1877f2;" aria-label="Facebook">
+                          <img src="https://via.placeholder.com/32x32/ffffff/1877f2?text=F" alt="Facebook" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                        <a href="https://instagram.com/beifity" class="social-icon" style="background: #e4405f;" aria-label="Instagram">
+                          <img src="https://via.placeholder.com/32x32/ffffff/e4405f?text=I" alt="Instagram" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                        <a href="https://twitter.com/beifity" class="social-icon" style="background: #000000;" aria-label="Twitter">
+                          <img src="https://via.placeholder.com/32x32/ffffff/000000?text=T" alt="Twitter" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -999,37 +1076,44 @@ export const generateMarketingEmail = (recipientName, products) => {
   `;
 };
 export const generateMarketingAdminReportEmail = (products, recipients) => {
-  const sanitizedRecipients = recipients.map(r => sanitizeHtml(r, sanitizeConfig)).join(', ');
+  const sanitizedRecipients = recipients.slice(0, 5).map(r => sanitizeHtml(r, sanitizeConfig)).join(', ') + (recipients.length > 5 ? ` +${recipients.length - 5} more` : '');
   const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.beifity.com';
+  const campaignDate = new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const productDetails = products
     .map((product) => {
       const sanitizedProductName = sanitizeHtml(capitalizeWords(product.name), sanitizeConfig);
       const sanitizedPrice = sanitizeHtml(product.price.toFixed(2), sanitizeConfig);
       const sanitizedDescription = sanitizeHtml(product.description.slice(0, 100) + (product.description.length > 100 ? '...' : ''), sanitizeConfig);
-      const sanitizedImage = sanitizeHtml(product.image || 'https://via.placeholder.com/300', sanitizeConfig);
+      const sanitizedImage = sanitizeHtml(product.image || 'https://via.placeholder.com/300x300/ffffff/cccccc?text=No+Image', sanitizeConfig);
       const sanitizedProductUrl = sanitizeHtml(product.url, { ...sanitizeConfig, allowedSchemes: ['https'] });
 
       return `
         <tr>
-          <td style="padding: 16px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1); transition: transform 0.3s ease;">
+          <td style="padding: 0 0 24px 0;">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="100%" class="product-table" style="background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border: 1px solid #e2e8f0;">
               <tr>
                 <td style="position: relative; text-align: center; padding: 0;">
-                  <div style="position: relative; overflow: hidden; border-radius: 16px 16px 0 0;">
-                    <img src="${sanitizedImage}" alt="${sanitizedProductName}" style="width: 100%; max-width: 300px; height: auto; display: block; margin: 0 auto; transition: transform 0.3s ease;">
-                    <span style="position: absolute; top: 12px; right: 12px; background: linear-gradient(90deg, #10b981, #34d399); color: #ffffff; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);">In Stock</span>
+                  <div style="position: relative; overflow: hidden; border-radius: 12px 12px 0 0; background: #f8fafc; padding: 24px 0;">
+                    <img src="${sanitizedImage}" alt="${sanitizedProductName}" style="width: 100%; max-width: 100%; height: auto; display: block; margin: 0 auto;" width="300" height="300">
+                    <span style="position: absolute; top: 16px; right: 16px; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.5px;">In Stock</span>
                   </div>
                 </td>
               </tr>
               <tr>
-                <td style="padding: 20px; text-align: center;">
-                  <h3 style="font-size: 22px; font-weight: 700; color: #1e3a8a; margin: 0 0 10px; line-height: 1.3;">${sanitizedProductName}</h3>
-                  <p style="font-size: 20px; font-weight: 700; color: #e11d48; margin: 0 0 10px;">KES ${sanitizedPrice}</p>
-                  <p style="font-size: 15px; color: #475569; line-height: 1.5; margin: 0 0 16px;">${sanitizedDescription}</p>
-                  <a href="${sanitizedProductUrl}" style="display: inline-block; background: linear-gradient(90deg, #1e40af, #60a5fa); color: #ffffff; font-size: 16px; font-weight: 600; padding: 12px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease;">
-                    View Product
-                  </a>
+                <td style="padding: 24px 20px; text-align: left;">
+                  <h3 style="font-size: 20px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; line-height: 1.3;">${sanitizedProductName}</h3>
+                  <p style="font-size: 18px; font-weight: 700; color: #dc2626; margin: 0 0 12px 0; line-height: 1.2;">KES ${sanitizedPrice}</p>
+                  <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">${sanitizedDescription}</p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="text-align: right;">
+                        <a href="${sanitizedProductUrl}" style="display: inline-block; background: #3b82f6; color: #ffffff; font-size: 14px; font-weight: 600; padding: 12px 24px; text-decoration: none; border-radius: 8px; transition: background-color 0.2s ease;">
+                          View Product
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -1045,86 +1129,157 @@ export const generateMarketingAdminReportEmail = (products, recipients) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta name="x-apple-disable-message-reformatting">
+      <meta name="color-scheme" content="light dark">
+      <meta name="supported-color-schemes" content="light dark">
       <title>Marketing Campaign Report - BeiFity.Com</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
-        body { font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background: #f0f2f5 url('https://www.transparenttextures.com/patterns/soft-wallpaper.png'); }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { 
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+          margin: 0; 
+          padding: 0; 
+          background: #f8fafc; 
+          -webkit-text-size-adjust: 100%;
+          -ms-text-size-adjust: 100%;
+          color: #1e293b;
+        }
+        table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
         .container { max-width: 600px; margin: 0 auto; }
-        a:hover { transform: scale(1.05); background: #1e3a8a !important; }
-        .product-table:hover { transform: translateY(-4px); }
-        img { max-width: 100%; height: auto; }
-        .social-icon { transition: transform 0.3s ease; }
-        .social-icon:hover { transform: scale(1.1); }
+        .button { display: inline-block; text-decoration: none; }
+        .button:hover { opacity: 0.9; }
+        .product-table:hover { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); transform: translateY(-1px); transition: all 0.2s ease; }
+        img { max-width: 100%; height: auto; border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+        .social-icon { display: inline-block; margin: 0 8px; width: 32px; height: 32px; border-radius: 50%; transition: transform 0.2s ease; }
+        .social-icon:hover { transform: scale(1.05); }
+        .preheader { display: none !important; max-height: 0; overflow: hidden; color: #64748b; font-size: 1px; line-height: 1px; }
+        /* Dark Mode */
+        @media (prefers-color-scheme: dark) {
+          body { background: #0f172a; color: #f1f5f9; }
+          .container { background: #1e293b; }
+          .product-table { background: #334155; border-color: #475569; }
+          .hero { background: linear-gradient(135deg, #1e40af, #1d4ed8); }
+          .recipients-section, .cta-section { background: #334155; }
+          .footer { background: #0f172a; color: #94a3b8; }
+          .footer a { color: #60a5fa; }
+        }
+        /* Responsive Styles */
         @media only screen and (max-width: 600px) {
-          .container { max-width: 100% !important; padding: 10px !important; }
-          .hero h1 { font-size: 24px !important; }
-          .hero p { font-size: 16px !important; }
-          .product-table img { max-width: 90% !important; }
-          .stock-badge { position: static !important; display: inline-block; margin: 10px auto !important; }
+          .container { width: 100% !important; padding: 0 16px !important; }
+          .hero { padding: 32px 20px !important; }
+          .hero h1 { font-size: 24px !important; line-height: 1.2 !important; }
+          .hero p { font-size: 16px !important; line-height: 1.4 !important; }
+          .hero .button { padding: 12px 24px !important; font-size: 15px !important; }
+          .product-table { margin: 0 !important; width: 100% !important; }
+          .product-content { padding: 20px 16px !important; text-align: center !important; }
+          .product-name { font-size: 18px !important; margin-bottom: 8px !important; }
+          .product-price { font-size: 18px !important; margin-bottom: 8px !important; }
+          .product-desc { font-size: 14px !important; margin-bottom: 16px !important; text-align: center !important; }
+          .product-button { padding: 10px 20px !important; font-size: 14px !important; }
+          .stock-badge { position: static !important; display: block !important; margin: 12px auto 0 !important; transform: none !important; }
+          .cta-button { padding: 12px 24px !important; font-size: 15px !important; }
+          .footer { padding: 24px 16px !important; }
+          .footer-text { font-size: 13px !important; line-height: 1.4 !important; }
+          .recipients-section { padding: 20px 16px !important; }
+          .recipients-text { font-size: 13px !important; }
+        }
+        @media only screen and (max-width: 480px) {
+          .hero h1 { font-size: 20px !important; }
+          .hero p { font-size: 14px !important; }
+          .product-name { font-size: 16px !important; }
+          .product-price { font-size: 16px !important; }
+          .product-desc { font-size: 13px !important; }
+          .header-logo { height: 48px !important; }
         }
       </style>
     </head>
-    <body style="background: #f0f2f5 url('https://www.transparenttextures.com/patterns/soft-wallpaper.png');">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 20px;">
+    <body style="margin: 0; padding: 0; background: #f8fafc;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding: 0;">
         <tr>
-          <td align="center">
-            <table role="presentation" class="container" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12); overflow: hidden;">
+          <td class="preheader" style="padding: 20px 0; font-size: 1px; line-height: 1px;">Marketing Campaign Report: Overview of sent emails, recipients, and promoted products for BeiFity.Com.</td>
+        </tr>
+        <tr>
+          <td align="center" style="padding: 40px 20px 0;">
+            <table role="presentation" class="container" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background: #ffffff; border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); overflow: hidden; border: 1px solid #e2e8f0;">
               <!-- Header -->
               <tr>
-                <td style="padding: 20px; text-align: center; background: #ffffff;">
-                  <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" style="width: auto; height: 60px; display: block; margin: 0 auto;">
+                <td style="padding: 24px 24px 0; text-align: center; background: #ffffff;">
+                  <a href="${FRONTEND_URL}" style="text-decoration: none;">
+                    <img src="https://www.beifity.com/assets/logo-without-CMu8rsBL.png" alt="BeiFity.Com Logo" class="header-logo" style="width: auto; height: 56px; display: block; margin: 0 auto;" width="160" height="56">
+                  </a>
                 </td>
               </tr>
               <!-- Hero Section -->
               <tr>
-                <td class="hero" style="background: linear-gradient(135deg, #1e40af, #60a5fa); padding: 40px 20px; text-align: center;">
-                  <h1 style="font-size: 28px; font-weight: 700; color: #ffffff; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 1px;">Campaign Report</h1>
-                  <p style="font-size: 18px; color: #e2e8f0; line-height: 1.5; margin: 0 0 20px;">
-                    Sent to ${recipients.length} users on ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}.
-                  </p>
-                  <a href="${FRONTEND_URL}/admin/dashboard" style="display: inline-block; background: linear-gradient(90deg, #fbbf24, #f59e0b); color: #1e293b; font-size: 16px; font-weight: 600; padding: 14px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease;">
+                <td class="hero" style="background: linear-gradient(135deg, #3b82f6, #60a5fa); padding: 40px 24px; text-align: center; color: #ffffff;">
+                  <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 8px 0; line-height: 1.3;">Campaign Report</h1>
+                  <p style="font-size: 18px; line-height: 1.6; margin: 0 0 24px 0;">Sent to <strong>${recipients.length}</strong> users on <strong>${campaignDate}</strong>.</p>
+                  <a href="${FRONTEND_URL}/admin/dashboard" class="button" style="display: inline-block; background: #fbbf24; color: #1e293b; font-size: 16px; font-weight: 600; padding: 14px 28px; text-decoration: none; border-radius: 8px;">
                     View Dashboard
                   </a>
                 </td>
               </tr>
-              <!-- Recipients -->
+              <!-- Recipients Section -->
               <tr>
-                <td style="padding: 20px; text-align: left; background: #f8fafc;">
-                  <p style="font-size: 16px; font-weight: 600; color: #1e40af; margin: 0 0 8px;">Recipients:</p>
-                  <p style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0;">${sanitizedRecipients}</p>
+                <td class="recipients-section" style="padding: 32px 24px; text-align: left; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+                  <h2 style="font-size: 20px; font-weight: 600; color: #1e293b; margin: 0 0 12px 0; line-height: 1.3;">Recipients Overview</h2>
+                  <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 16px 0;">Total: <strong>${recipients.length}</strong></p>
+                  <p class="recipients-text" style="font-size: 14px; color: #475569; line-height: 1.5; margin: 0; word-break: break-all;">${sanitizedRecipients}</p>
+                </td>
+              </tr>
+              <!-- Products Section Header -->
+              <tr>
+                <td style="padding: 32px 24px 16px; text-align: center; border-top: 1px solid #e2e8f0;">
+                  <h2 style="font-size: 24px; font-weight: 600; color: #1e293b; margin: 0 0 4px 0; line-height: 1.3;">Promoted Products</h2>
+                  <p style="font-size: 16px; color: #64748b; margin: 0; line-height: 1.5;">Featured in this campaign</p>
                 </td>
               </tr>
               <!-- Products -->
               <tr>
-                <td style="padding: 20px 20px 30px;">
+                <td style="padding: 0 24px 32px; border-top: 1px solid #e2e8f0;">
                   <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td style="padding: 0 0 16px; text-align: left;">
-                        <p style="font-size: 16px; font-weight: 600; color: #1e40af; margin: 0;">Promoted Products:</p>
-                      </td>
-                    </tr>
                     ${productDetails}
                   </table>
                 </td>
               </tr>
-              <!-- CTA -->
+              <!-- CTA Section -->
               <tr>
-                <td style="padding: 20px; text-align: center; background: #f8fafc;">
-                  <a href="${FRONTEND_URL}/admin/dashboard" style="display: inline-block; background: linear-gradient(90deg, #1e40af, #60a5fa); color: #ffffff; font-size: 16px; font-weight: 600; padding: 14px 32px; text-decoration: none; border-radius: 10px; transition: all 0.3s ease; text-transform: uppercase;">
+                <td class="cta-section" style="padding: 32px 24px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+                  <h3 style="font-size: 20px; font-weight: 600; color: #1e293b; margin: 0 0 12px 0; line-height: 1.3;">Next Steps</h3>
+                  <a href="${FRONTEND_URL}/admin/dashboard" class="button cta-button" style="display: inline-block; background: #3b82f6; color: #ffffff; font-size: 16px; font-weight: 600; padding: 14px 28px; text-decoration: none; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
                     Analyze Campaign
                   </a>
                 </td>
               </tr>
               <!-- Footer -->
               <tr>
-                <td style="padding: 30px 20px; text-align: center; background: linear-gradient(135deg, #f8fafc, #e5e7eb); border-radius: 0 0 20px 20px;">
-                  
-                  <p style="font-size: 14px; color: #475569; margin: 0 0 8px;">
-                    BeiFity.Com | Nairobi, Kenya | <a href="mailto:customer.care@beifity.com" style="color: #1e40af; text-decoration: underline;">customer.care@beifity.com</a>
+                <td class="footer" style="padding: 32px 24px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b;">
+                  <p style="font-size: 14px; margin: 0 0 12px 0; line-height: 1.5;">
+                    <a href="${FRONTEND_URL}/admin/unsubscribe" style="color: #3b82f6; text-decoration: none; font-weight: 500;">Manage Notifications</a> | 
+                    <a href="${FRONTEND_URL}/privacy" style="color: #3b82f6; text-decoration: none; font-weight: 500;">Privacy Policy</a>
                   </p>
-                  <p style="font-size: 14px; color: #475569; margin: 0;">
-                    <span style="color: #1e40af; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity</span>.Com</span> © ${new Date().getFullYear()}
+                  <p style="font-size: 14px; margin: 0 0 16px 0; line-height: 1.5;">
+                    BeiFity.Com | P.O. Box 12345, Nairobi, Kenya | <a href="mailto:support@beifity.com" style="color: #3b82f6; text-decoration: none;">support@beifity.com</a>
                   </p>
+                  <p style="font-size: 14px; margin: 0 0 20px 0; line-height: 1.5;">
+                    <span style="color: #1e293b; font-weight: 600;">BeiF<span style="color: #fbbf24;">ity</span>.Com</span> © ${new Date().getFullYear()} All rights reserved.
+                  </p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="text-align: center;">
+                        <a href="https://facebook.com/beifity" class="social-icon" style="background: #1877f2;" aria-label="Facebook">
+                          <img src="https://via.placeholder.com/32x32/ffffff/1877f2?text=F" alt="Facebook" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                        <a href="https://instagram.com/beifity" class="social-icon" style="background: #e4405f;" aria-label="Instagram">
+                          <img src="https://via.placeholder.com/32x32/ffffff/e4405f?text=I" alt="Instagram" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                        <a href="https://twitter.com/beifity" class="social-icon" style="background: #000000;" aria-label="Twitter">
+                          <img src="https://via.placeholder.com/32x32/ffffff/000000?text=T" alt="Twitter" style="width: 32px; height: 32px; border-radius: 50%; display: block;">
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -1135,7 +1290,6 @@ export const generateMarketingAdminReportEmail = (products, recipients) => {
     </html>
   `;
 };
-
 
 // Add to templates.js
 export const generateProductRequestEmail = (
