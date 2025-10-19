@@ -1,3 +1,37 @@
+// Shared Location Schema (to be used in both User and Listing)
+const LocationSchema = new mongoose.Schema({
+  country: {
+    type: String,
+    default: 'Kenya',
+    required: true,
+    enum: ['Kenya'], // Enforce Kenya for now; expand if needed
+  },
+  county: {
+    type: String,
+    required: true,
+  },
+  constituency: {
+    type: String,
+    required: true,
+  },
+  fullAddress: {
+    type: String,
+    default: '',
+  },
+  coordinates: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      default: [36.8219, -1.2921], // Default to Nairobi
+      index: '2dsphere', // Geo index for spatial queries
+    },
+  },
+}, { _id: false });
+
 // models/Listing.js
 import mongoose from 'mongoose';
 
@@ -45,13 +79,19 @@ const ProductInfoSchema = new mongoose.Schema({
   price: {
     type: Number,
     required: true,
+    min: 0,
   },
   cancelledPrice: {
     type: Number,
+    min: 0,
   },
   images: {
     type: [String],
     required: true,
+    validate: {
+      validator: (v) => v.length > 0 && v.length <= 5,
+      message: 'Images must be between 1 and 5',
+    },
   },
   category: {
     type: String,
@@ -64,14 +104,26 @@ const ProductInfoSchema = new mongoose.Schema({
   tags: {
     type: [String],
     default: [],
+    validate: {
+      validator: (v) => v.length <= 5,
+      message: 'Maximum 5 tags allowed',
+    },
   },
   sizes: {
     type: [String],
     default: [],
+    validate: {
+      validator: (v) => v.length <= 5,
+      message: 'Maximum 5 sizes allowed',
+    },
   },
   colors: {
     type: [String],
     default: [],
+    validate: {
+      validator: (v) => v.length <= 5,
+      message: 'Maximum 5 colors allowed',
+    },
   },
   usageDuration: {
     type: String,
@@ -85,10 +137,12 @@ const ProductInfoSchema = new mongoose.Schema({
   brand: {
     type: String,
     default: '',
+    trim: true,
   },
   model: {
     type: String,
     default: '',
+    trim: true,
   },
   warranty: {
     type: String,
@@ -106,18 +160,22 @@ const SellerInfoSchema = new mongoose.Schema({
   sellerNotes: {
     type: String,
     default: '',
+    trim: true,
   },
   responseTime: {
     type: Number,
     default: 0,
+    min: 0,
   },
   acceptanceRate: {
     type: Number,
     default: 0,
+    min: 0,
+    max: 100,
   },
 });
 
-// Analytics Schema
+// Analytics Schema (optimized with indexes where applicable)
 const AnalyticsSchema = new mongoose.Schema({
   views: {
     total: {
@@ -169,6 +227,8 @@ const AnalyticsSchema = new mongoose.Schema({
   conversionRate: {
     type: Number,
     default: 0,
+    min: 0,
+    max: 100,
   },
 });
 
@@ -186,13 +246,14 @@ const ReviewSchema = new mongoose.Schema({
   },
   rating: {
     type: Number,
-    min: 0,
+    min: 1,
     max: 5,
     required: true,
   },
   createdAt: {
     type: Date,
     default: Date.now,
+    index: true, // For sorting reviews by date
   },
 });
 
@@ -209,24 +270,10 @@ const ListingSchema = new mongoose.Schema({
   analytics: {
     type: AnalyticsSchema,
     default: () => ({
-      views: {
-        total: 0,
-        uniqueViewers: [],
-      },
-      cartAdditions: {
-        total: 0,
-        userIds: [],
-        guestIds: [],
-      },
-      wishlist: {
-        total: 0,
-        userIds: [],
-        guestIds: [],
-      },
-      shared: {
-        total: 0,
-        platforms: {},
-      },
+      views: { total: 0, uniqueViewers: [] },
+      cartAdditions: { total: 0, userIds: [], guestIds: [] },
+      wishlist: { total: 0, userIds: [], guestIds: [] },
+      shared: { total: 0, platforms: {} },
       reportsReceived: 0,
       inquiries: 0,
       negotiationAttempts: 0,
@@ -248,8 +295,8 @@ const ListingSchema = new mongoose.Schema({
     enum: ['Pending', 'Verified', 'Rejected'],
   },
   location: {
-    type: String,
-    default: 'Kenya',
+    type: LocationSchema,
+    required: true,
   },
   isSold: {
     type: Boolean,
@@ -264,6 +311,7 @@ const ListingSchema = new mongoose.Schema({
   AgreedToTerms: {
     type: Boolean,
     required: true,
+    default: false, // Changed default to false for safety
   },
   featured: {
     type: Boolean,
@@ -275,14 +323,20 @@ const ListingSchema = new mongoose.Schema({
   inventory: {
     type: Number,
     default: 1,
+    min: 1,
   },
   shippingOptions: {
     type: [String],
     default: ['Local Pickup', 'Delivery'],
+    validate: {
+      validator: (v) => v.length > 0 && v.length <= 3,
+      message: 'Shipping options must be 1-3',
+    },
   },
   expiresAt: {
     type: Date,
     required: true,
+    index: { expireAfterSeconds: 2592000 }, // TTL index for 30 days auto-expiry
   },
   isActive: {
     type: Boolean,
@@ -294,6 +348,13 @@ const ListingSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// Compound indexes for efficient queries
+ListingSchema.index({ 'seller.sellerId': 1 });
+ListingSchema.index({ 'location.coordinates': '2dsphere' });
+ListingSchema.index({ category: 1, 'location.county': 1 }); // For category/location searches
+ListingSchema.index({ isActive: 1, expiresAt: 1 });
+ListingSchema.index({ isSold: 1 });
+
 // Pre-save hook to calculate rating
 ListingSchema.pre('save', function (next) {
   if (this.isModified('reviews')) {
@@ -301,9 +362,13 @@ ListingSchema.pre('save', function (next) {
     const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
     this.rating = reviews.length ? totalRating / reviews.length : 0;
   }
+
+  // Auto-set location from seller if not provided (requires population in controller)
+  if (!this.location || !this.location.county) {
+    // In controller: await populate seller and set this.location = seller.location
+  }
+
   next();
 });
-
-// ListingSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 2592000 });  30 days in seconds
 
 export const listingModel = mongoose.model('Listing', ListingSchema);

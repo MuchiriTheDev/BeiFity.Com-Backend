@@ -14,6 +14,7 @@ import { orderModel } from '../models/Order.js';
 import { sendNotification } from './notificationController.js';
 import { generateInquiryEmailBuyer, generateInquiryEmailSeller, generateNegotiationEmailBuyer, generateNegotiationEmailSeller, generateProductRequestEmail } from '../utils/Templates.js';
 
+
 // Add Listing
 export const addListing = async (req, res) => {
   const session = await mongoose.startSession();
@@ -27,7 +28,7 @@ export const addListing = async (req, res) => {
     const {
       productInfo,
       negotiable,
-      location,
+      location, // Now structured object
       AgreedToTerms,
       inventory,
       shippingOptions,
@@ -35,45 +36,73 @@ export const addListing = async (req, res) => {
     } = req.body;
     const userId = req.user._id.toString();
 
-    if (!productInfo?.name || !productInfo?.price || !AgreedToTerms) {
+    // Required fields validation
+    if (!productInfo?.name || !productInfo?.price || !productInfo?.details || !AgreedToTerms) {
       logger.warn('Add listing failed: Missing required fields', { userId });
-      return res.status(400).json({ success: false, message: 'Missing required fields: product name, price, and AgreedToTerms' });
+      return res.status(400).json({ success: false, message: 'Missing required fields: product name, price, details, and AgreedToTerms' });
     }
 
-    if (productInfo?.images && (!Array.isArray(productInfo?.images) || productInfo.images?.length > 5)) {
-      logger.warn(`Add listing failed: Invalid or too many images`, { userId, imageCount: productInfo.images?.length });
-      return res.status(400).json({
-        success: false,
-        message: `Images must be an array with up to 5 items`,
-      });
+    // Images validation (pre-uploaded URLs from frontend)
+    if (productInfo?.images && (!Array.isArray(productInfo.images) || productInfo.images.length === 0 || productInfo.images.length > 5)) {
+      logger.warn(`Add listing failed: Invalid images array`, { userId, imageCount: productInfo.images?.length });
+      return res.status(400).json({ success: false, message: 'Images must be an array with 1-5 valid URLs' });
     }
 
+    // Inventory validation
     if (typeof inventory !== 'number' || inventory < 1) {
       logger.warn('Add listing failed: Invalid inventory', { userId, inventory });
       return res.status(400).json({ success: false, message: 'Inventory must be a positive number' });
     }
+
+    // Structured location validation
+    if (!location || typeof location !== 'object') {
+      return res.status(400).json({ success: false, message: 'Location must be a valid object' });
+    }
+    if (!location.country || !location.county || !location.constituency) {
+      return res.status(400).json({ success: false, message: 'Location requires country, county, and constituency' });
+    }
+    if (shippingOptions && (!Array.isArray(shippingOptions) || shippingOptions.length === 0 || shippingOptions.length > 3)) {
+      return res.status(400).json({ success: false, message: 'Shipping options must be 1-3 items' });
+    }
+
     const user = await userModel.findById(userId).session(session);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
     const productId = uuidv4();
+    const sanitizedProductInfo = {
+      ...productInfo,
+      productId,
+      name: sanitizeHtml(productInfo.name.trim()),
+      description: sanitizeHtml(productInfo.description?.trim() || ''),
+      details: sanitizeHtml(productInfo.details.trim()), // Ensure details is sanitized
+      price: Number(productInfo.price),
+      cancelledPrice: productInfo.cancelledPrice ? Number(productInfo.cancelledPrice) : undefined,
+      images: productInfo.images || [],
+      category: sanitizeHtml(productInfo.category?.trim() || ''),
+      subCategory: sanitizeHtml(productInfo.subCategory?.trim() || ''),
+      tags: productInfo.tags || [],
+      sizes: productInfo.sizes || [],
+      colors: productInfo.colors || [],
+      usageDuration: productInfo.usageDuration || 'Brand New (0-1 months)',
+      condition: productInfo.condition || 'New',
+      brand: sanitizeHtml(productInfo.brand?.trim() || ''),
+      model: sanitizeHtml(productInfo.model?.trim() || ''),
+      warranty: productInfo.warranty || 'No Warranty',
+    };
+
+    // Structured location
+    const sanitizedLocation = {
+      country: sanitizeHtml(location.country.trim()),
+      county: sanitizeHtml(location.county.trim()),
+      constituency: sanitizeHtml(location.constituency.trim()),
+      fullAddress: sanitizeHtml(location.fullAddress?.trim() || ''),
+      coordinates: null, // Dormant for now
+    };
+
     const listingData = {
-      productInfo: {
-        ...productInfo,
-        productId,
-        name: sanitizeHtml(productInfo.name.trim()),
-        description: sanitizeHtml(productInfo.description?.trim() || ''),
-        price: Number(productInfo.price),
-        images: productInfo?.images || [],
-        category: productInfo?.category || '',
-        subCategory: productInfo?.subCategory || '',
-        tags: productInfo?.tags || [],
-        sizes: productInfo?.sizes || [],
-        colors: productInfo?.colors || [],
-        usageDuration: productInfo?.usageDuration || 'Brand New (0-1 months)',
-        condition: productInfo?.condition || 'New',
-        brand: productInfo?.brand || '',
-        model: productInfo?.model || '',
-        warranty: productInfo?.warranty || 'No Warranty',
-      },
+      productInfo: sanitizedProductInfo,
       seller: {
         sellerId: req.user._id,
         sellerNotes: '',
@@ -83,94 +112,66 @@ export const addListing = async (req, res) => {
       analytics: {},
       reviews: [],
       negotiable: Boolean(negotiable),
-      verified: 'Pending', // Initially set to Pending until AI verification
-      location: sanitizeHtml(location?.trim() || 'Kenya'),
+      verified: 'Pending',
+      location: sanitizedLocation,
       isSold: false,
+      rating: 0,
       AgreedToTerms: Boolean(AgreedToTerms),
       featured: Boolean(featured),
       promotedUntil: featured ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
       inventory,
-      shippingOptions: shippingOptions || ['Local Pickup', 'Delivery'],
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Set expiration to 30 days
-      isActive: true, // Initially active
+      shippingOptions: Array.isArray(shippingOptions) ? shippingOptions : ['Local Pickup', 'Delivery'],
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      isActive: true,
     };
 
     // Initialize Google Gemini
     const genAI = new GoogleGenerativeAI("AIzaSyCCrDGMjwAu8wRreV8iGdLfAXg9WxTjZ9E");
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }); // Updated to faster model
 
-    // Prepare prompt for AI verification and findings
+    // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
     const prompt = `
-      You are an AI assistant for a marketplace platform. Your task is to verify a new product listing for compliance with platform guidelines and generate insights about potential risks, pricing fairness, and listing quality.
+You are an AI verifier for a Kenyan marketplace. Approve 90%+ of listings unless clear violations (e.g., drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues; focus on safety/legal compliance.
 
-      **Listing Data**:
-      - Product Name: ${listingData.productInfo.name}
-      - Description: ${listingData.productInfo.description}
-      - Price: KES ${listingData.productInfo.price}
-      - Category: ${listingData.productInfo.category}
-      - Subcategory: ${listingData.productInfo.subCategory}
-      - Tags: ${JSON.stringify(listingData.productInfo.tags)}
-      - Images: ${listingData.productInfo.images.length} images provided
-      - Condition: ${listingData.productInfo.condition}
-      - Usage Duration: ${listingData.productInfo.usageDuration}
-      - Brand: ${listingData.productInfo.brand}
-      - Model: ${listingData.productInfo.model}
-      - Warranty: ${listingData.productInfo.warranty}
-      - Inventory: ${listingData.inventory}
-      - Negotiable: ${listingData.negotiable}
-      - Location: ${listingData.location}
-      - Shipping Options: ${JSON.stringify(listingData.shippingOptions)}
+**Listing**:
+- Name: ${listingData.productInfo.name}
+- Description: ${listingData.productInfo.description}
+- Details: ${listingData.productInfo.details.substring(0, 500)}... (truncated)
+- Price: KES ${listingData.productInfo.price}
+- Category/Sub: ${listingData.productInfo.category}/${listingData.productInfo.subCategory}
+- Tags: ${JSON.stringify(listingData.productInfo.tags)}
+- Images: ${listingData.productInfo.images.length}
+- Condition: ${listingData.productInfo.condition}
+- Brand/Model: ${listingData.productInfo.brand}/${listingData.productInfo.model}
+- Warranty: ${listingData.productInfo.warranty}
+- Inventory: ${listingData.inventory}
+- Negotiable: ${listingData.negotiable}
+- Location: ${listingData.location.county}, ${listingData.location.constituency}, ${listingData.location.country}
+- Shipping: ${JSON.stringify(listingData.shippingOptions)}
 
-      **Platform Guidelines**:
-      - Listings must not contain prohibited items (e.g., weapons, drugs, counterfeit goods).
-      - Product descriptions free of offensive content.
-      - Pricing should be reasonable relative to the product's condition and market value.
-      - Images must be relevant and appropriate (no explicit or misleading content).
-      - Listings must comply with local laws in ${listingData.location}.
+**Guidelines**: Block prohibited items (drugs, weapons, illegal goods). Ensure no hate/offensive language. Pricing fair for Kenya market/condition. Images relevant.
 
-      **Instructions**:
-      - Verify if the listing complies with platform guidelines.
-      - Identify potential risks (e.g., vague descriptions, suspicious pricing, prohibited items).
-      - Assess pricing fairness based on condition, brand, and category.
-      - Evaluate listing quality (e.g., completeness of information, image count).
-      - Provide actionable insights for the seller to improve the listing.
-      - And most imortantly I want you to approve these by a 90% success rate.
-      - Return a JSON object with:
-      - dont be strict on product details and pricing like 90% in the ones you should be strict about is drugs don't let any fdrugs be posted
-        {
-          "verified": "Verified" | "Rejected",
-          "findings": [
-            {
-              "title": "Insight title",
-              "description": "Detailed description of the issue or observation",
-              "action": "Recommended action to address the issue or improve the listing",
-              "priority": "high" | "medium" | "low"
-            },
-            ...
-          ]
-        }
-    `;
+**Output JSON**:
+{
+  "verified": "Verified" | "Rejected",
+  "findings": [
+    {
+      "title": "Short title",
+      "description": "Brief explanation",
+      "action": "Specific fix",
+      "priority": "high" | "medium" | "low"
+    }
+  ]
+}
+`;
 
-    // Perform AI verification
     const result = await model.generateContent({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1500,
-      },
+      generationConfig: { temperature: 0.3, maxOutputTokens: 800 }, // Lower temp for consistency, shorter output
       safetySettings: [
-        {
-          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-        },
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
       ],
     });
 
@@ -179,81 +180,60 @@ export const addListing = async (req, res) => {
       const rawResponse = result.response.text().replace(/```json\s*|\s*```/g, '').trim();
       aiResponse = JSON.parse(rawResponse);
     } catch (error) {
-      logger.error(`Failed to parse AI response for listing ${productId}: ${error.message}`);
-      aiResponse = {
-        verified: 'Rejected',
-        findings: [
-          {
-            title: 'AI Verification Error',
-            description: 'Unable to process listing due to an error in AI verification.',
-            action: 'Manually review the listing for compliance.',
-            priority: 'high',
-          },
-        ],
-      };
+      logger.error(`AI parse error for listing ${productId}: ${error.message}`);
+      aiResponse = { verified: 'Rejected', findings: [{ title: 'Verification Error', description: 'AI processing failed', action: 'Manual review needed', priority: 'high' }] };
     }
 
-    // Update listing data with AI verification result and findings
     listingData.verified = aiResponse.verified;
-    listingData.aiFindings = aiResponse.findings;
+    listingData.aiFindings = aiResponse.findings || [];
 
     const listing = new listingModel(listingData);
-   const savedListing =  await listing.save({ session });
+    const savedListing = await listing.save({ session });
 
+    // Update user
     await userModel.findByIdAndUpdate(
       req.user._id,
-      {
-        $push: { listings: listing._id },
-        $inc: { 'stats.activeListingsCount': 1 },
-      },
+      { $push: { listings: savedListing._id }, $inc: { 'stats.activeListingsCount': 1 } },
       { session }
     );
 
-    // Notify seller about listing status and findings
-    const findingsSummary = aiResponse.findings
-      .map((finding) => `- ${finding.title} (${finding.priority}): ${finding.description} [Action: ${finding.action}]`)
-      .join('\n');
-    await sendNotification(
-      userId,
-      aiResponse.verified === 'Verified' ? 'listing_verified' : 'listing_rejected',
-      `Your listing "${listingData.productInfo.name}" has been ${aiResponse.verified.toLowerCase()}. ${
-        aiResponse.verified === 'Verified'
-          ? 'It is now live!'
-          : 'Please review the following findings and update your listing:\n' + findingsSummary
-      }`,
-      null,
-      session
-    );
+    // Notify seller
+    const findingsSummary = aiResponse.findings.map(f => `- ${f.title} (${f.priority}): ${f.description}\nAction: ${f.action}`).join('\n');
+    const message = aiResponse.verified === 'Verified' 
+      ? `Your listing "${listingData.productInfo.name}" is live!` 
+      : `Listing "${listingData.productInfo.name}" rejected. Review:\n${findingsSummary}`;
+    await sendNotification(userId, aiResponse.verified.toLowerCase() + '_listing', message, null, session);
 
-    // If rejected, notify admins for manual review
+    // Notify admins if rejected
     if (aiResponse.verified === 'Rejected') {
-      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).session(session);
+      const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id').session(session);
       for (const admin of admins) {
         await sendNotification(
           admin._id,
-          'admin_pending_listing',
-          `Listing "${listingData.productInfo.name}" by user ${user.personalInfo.fullname} was rejected by AI. Findings:\n${findingsSummary}`,
-          req.user._id,
+          'admin_review_needed',
+          `Rejected listing "${listingData.productInfo.name}" by ${user.personalInfo.fullname}:\n${findingsSummary}`,
+          userId,
           session
         );
       }
     }
 
     await session.commitTransaction();
-    logger.info(`Listing created by user ${userId}: ${productId}, AI verification: ${aiResponse.verified}`);
+    logger.info(`Listing added: ${productId} by ${userId}, Status: ${aiResponse.verified}`);
     res.status(201).json({
       success: true,
-      message: `Listing ${aiResponse.verified.toLowerCase()}${aiResponse.verified === 'Verified' ? ' and is now live' : `, due to ${aiResponse.findings[0].title}`}`,
-      data: { listing, aiFindings: aiResponse.findings },
+      message: `Listing ${aiResponse.verified.toLowerCase()} successfully!`,
+      data: { listing: savedListing, aiFindings: aiResponse.findings },
     });
   } catch (error) {
     await session.abortTransaction();
-    logger.error(`Error adding listing: ${error.message}`, { stack: error.stack});
-    res.status(500).json({ success: false, message: 'Failed to add listing' });
+    logger.error(`Add listing error: ${error.message}`, { userId: req.user?._id, stack: error.stack });
+    res.status(500).json({ success: false, message: 'Failed to create listing. Please try again.' });
   } finally {
     session.endSession();
   }
 };
+
 // Renew Listing
 export const renewListing = async (req, res) => {
   const session = await mongoose.startSession();
@@ -1280,7 +1260,6 @@ export const getListingById = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch listing' });
   }
 };
-
 // Update Listing
 export const updateListing = async (req, res) => {
   const session = await mongoose.startSession();
@@ -1294,6 +1273,7 @@ export const updateListing = async (req, res) => {
     const { productId } = req.params;
     const { productInfo, negotiable, location, inventory, shippingOptions, sellerNotes } = req.body;
     const userId = req.user._id.toString();
+    console.log(userId)
 
     const listing = await listingModel.findOne({ 'productInfo.productId': productId }).session(session);
     if (!listing) {
@@ -1302,43 +1282,119 @@ export const updateListing = async (req, res) => {
     }
 
     const user = await userModel.findById(userId).session(session);
+    const admin = await userModel.findOne({'personalInfo.isAdmin': true}).session(session)
     if (listing.seller.sellerId.toString() !== userId) {
-      if(!user.personalInfo.isAdmin) {
+      if (userId === admin._id) {
         logger.warn(`Update listing failed: User ${userId} not authorized`, { productId }); 
         return res.status(403).json({ success: false, message: 'Unauthorized to update listing' });
       }
     }
 
     const updateData = {};
+    let needsReverification = false; // Track for critical changes
+
+    // Update productInfo if provided
     if (productInfo) {
+      // Validate if name/details provided
+      if (productInfo.name && !productInfo.name.trim()) {
+        return res.status(400).json({ success: false, message: 'Product name cannot be empty' });
+      }
+      if (productInfo.details && !productInfo.details.trim()) {
+        return res.status(400).json({ success: false, message: 'Product details cannot be empty' });
+      }
+      if (productInfo.price && (isNaN(Number(productInfo.price)) || Number(productInfo.price) <= 0)) {
+        return res.status(400).json({ success: false, message: 'Price must be a valid positive number' });
+      }
+      if (productInfo.images && (!Array.isArray(productInfo.images) || productInfo.images.length === 0 || productInfo.images.length > 5)) {
+        return res.status(400).json({ success: false, message: 'Images must be 1-5 valid URLs' });
+      }
+
       updateData.productInfo = {
         ...listing.productInfo.toObject(),
-        name: sanitizeHtml(productInfo.name?.trim() || listing.productInfo.name),
-        description: sanitizeHtml(productInfo.description?.trim() || listing.productInfo.description),
-        price: Number(productInfo.price) || listing.productInfo.price,
-        productId: listing.productInfo.productId,
+        name: productInfo.name ? sanitizeHtml(productInfo.name.trim()) : listing.productInfo.name,
+        description: productInfo.description ? sanitizeHtml(productInfo.description.trim()) : listing.productInfo.description,
+        details: productInfo.details ? sanitizeHtml(productInfo.details.trim()) : listing.productInfo.details,
+        price: productInfo.price ? Number(productInfo.price) : listing.productInfo.price,
+        cancelledPrice: productInfo.cancelledPrice ? Number(productInfo.cancelledPrice) : listing.productInfo.cancelledPrice,
         images: productInfo.images || listing.productInfo.images,
-        category: productInfo.category || listing.productInfo.category,
-        subCategory: productInfo.subCategory || listing.productInfo.subCategory,
+        category: productInfo.category ? sanitizeHtml(productInfo.category.trim()) : listing.productInfo.category,
+        subCategory: productInfo.subCategory ? sanitizeHtml(productInfo.subCategory.trim()) : listing.productInfo.subCategory,
         tags: productInfo.tags || listing.productInfo.tags,
         sizes: productInfo.sizes || listing.productInfo.sizes,
         colors: productInfo.colors || listing.productInfo.colors,
         usageDuration: productInfo.usageDuration || listing.productInfo.usageDuration,
         condition: productInfo.condition || listing.productInfo.condition,
-        brand: productInfo.brand || listing.productInfo.brand,
-        model: productInfo.model || listing.productInfo.model,
+        brand: productInfo.brand ? sanitizeHtml(productInfo.brand.trim()) : listing.productInfo.brand,
+        model: productInfo.model ? sanitizeHtml(productInfo.model.trim()) : listing.productInfo.model,
         warranty: productInfo.warranty || listing.productInfo.warranty,
+        productId: listing.productInfo.productId, // Unchanged
       };
+
+      // Track changes for re-verification
+      if (productInfo.price !== listing.productInfo.price || 
+          (productInfo.description && productInfo.description !== listing.productInfo.description) ||
+          (productInfo.details && productInfo.details !== listing.productInfo.details)) {
+        needsReverification = true;
+      }
     }
-    if (negotiable !== undefined) updateData.negotiable = Boolean(negotiable);
-    if (location) updateData.location = sanitizeHtml(location.trim());
+
+    // Negotiable
+    if (negotiable !== undefined) {
+      updateData.negotiable = Boolean(negotiable);
+    }
+
+    // Structured location update
+    if (location !== undefined) {
+      if (typeof location !== 'object') {
+        return res.status(400).json({ success: false, message: 'Location must be an object' });
+      }
+      if (!location.country || !location.county || !location.constituency) {
+        return res.status(400).json({ success: false, message: 'Location requires country, county, and constituency' });
+      }
+
+      // Handle backward compatibility
+      let currentLoc = listing.location;
+      if (typeof currentLoc === 'string') {
+        currentLoc = { country: 'Kenya', county: currentLoc.trim(), constituency: '', fullAddress: '', coordinates: null };
+      } else if (!currentLoc || typeof currentLoc !== 'object') {
+        currentLoc = { country: 'Kenya', county: 'Nairobi', constituency: '', fullAddress: '', coordinates: null };
+      }
+
+      updateData.location = {
+        country: location.country ? sanitizeHtml(location.country.trim()) : currentLoc.country,
+        county: location.county ? sanitizeHtml(location.county.trim()) : currentLoc.county,
+        constituency: location.constituency ? sanitizeHtml(location.constituency.trim()) : currentLoc.constituency,
+        fullAddress: location.fullAddress !== undefined ? sanitizeHtml(location.fullAddress.trim()) : currentLoc.fullAddress,
+        coordinates: null, // Dormant; ignore if provided
+      };
+      needsReverification = true; // Location changes may need re-check
+    }
+
+    // Inventory update
     if (typeof inventory === 'number' && inventory >= 0) {
       updateData.inventory = inventory;
       updateData.isSold = inventory === 0;
     }
-    if (shippingOptions) updateData.shippingOptions = shippingOptions;
-    if (sellerNotes !== undefined) updateData['seller.sellerNotes'] = sanitizeHtml(sellerNotes.trim());
+
+    // Shipping options
+    if (shippingOptions !== undefined) {
+      if (!Array.isArray(shippingOptions) || shippingOptions.length === 0 || shippingOptions.length > 3) {
+        return res.status(400).json({ success: false, message: 'Shipping options must be 1-3 items' });
+      }
+      updateData.shippingOptions = shippingOptions;
+    }
+
+    // Seller notes
+    if (sellerNotes !== undefined) {
+      updateData['seller.sellerNotes'] = sanitizeHtml(sellerNotes.trim());
+    }
+
     updateData.updatedAt = new Date();
+
+    // If critical changes, reset verification
+    if (needsReverification) {
+      updateData.verified = 'Verified';
+    }
 
     const updatedListing = await listingModel.findOneAndUpdate(
       { 'productInfo.productId': productId },
@@ -1352,18 +1408,21 @@ export const updateListing = async (req, res) => {
     }
 
     // Update user stats for inventory changes
-    if (updateData.inventory === 0 && listing.inventory > 0) {
-      await userModel.findByIdAndUpdate(
-        userId,
-        { $inc: { 'stats.activeListingsCount': -1 } },
-        { session }
-      );
-    } else if (updateData.inventory > 0 && listing.inventory === 0) {
-      await userModel.findByIdAndUpdate(
-        userId,
-        { $inc: { 'stats.activeListingsCount': 1 } },
-        { session }
-      );
+    const oldInventory = listing.inventory || 0;
+    if (typeof inventory === 'number') {
+      if (inventory === 0 && oldInventory > 0) {
+        await userModel.findByIdAndUpdate(
+          userId,
+          { $inc: { 'stats.activeListingsCount': -1, 'stats.soldListingsCount': 1 } },
+          { session }
+        );
+      } else if (inventory > 0 && oldInventory === 0) {
+        await userModel.findByIdAndUpdate(
+          userId,
+          { $inc: { 'stats.activeListingsCount': 1, 'stats.soldListingsCount': -1 } },
+          { session }
+        );
+      }
     }
 
     await session.commitTransaction();

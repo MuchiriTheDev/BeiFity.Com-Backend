@@ -28,6 +28,7 @@ import './utils/emailMarketing.js'
 import transactionRouter from './routes/transactionRoutes.js';
 import swiftRouter from './routes/swiftRouter.js';
 import dashboardRouter from './routes/dashboardRoutes.js';
+import { migrateLocations } from './utils/migration.js';
 
 const app = express();
 const cache = new NodeCache({ stdTTL: 3600 });
@@ -83,6 +84,7 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO
 initializeSocket(server, corsOptions);
+
 
 // Routes
 app.use('/api/users', authRouter);
