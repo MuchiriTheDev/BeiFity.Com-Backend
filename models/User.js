@@ -104,27 +104,28 @@ const UserSchema = new mongoose.Schema(
         min: 0,
         max: 100,
       },
+      recipient_code: { type: String, default: null }, // Paystack only
+      mobileMoneyDetails: {
+        provider: { type: String, enum: ['M-Pesa'], default: 'M-Pesa' },
+        phoneNumber: { 
+          type: String, 
+          validate: { 
+            validator: (v) => /^\+?254[17]\d{8}$/.test(v), 
+            message: 'Invalid Kenyan M-Pesa number' 
+          } 
+        },
+        accountName: { type: String, trim: true },
+        verified: { type: Boolean, default: false },
+      },
+      isAdmin: {
+        type: Boolean,
+        default: false,
+      },
+      deviceToken: { type: String },
     },
     
     // Payment/Financial
-    recipient_code: { type: String, default: null }, // Paystack only
-    mobileMoneyDetails: {
-      provider: { type: String, enum: ['M-Pesa'], default: 'M-Pesa' },
-      phoneNumber: { 
-        type: String, 
-        validate: { 
-          validator: (v) => /^\+?254[17]\d{8}$/.test(v), 
-          message: 'Invalid Kenyan M-Pesa number' 
-        } 
-      },
-      accountName: { type: String, trim: true },
-      verified: { type: Boolean, default: false },
-    },
-    isAdmin: {
-      type: Boolean,
-      default: false,
-    },
-    deviceToken: { type: String },
+  
     
     // Push and activity
     pushSubscription: { type: Object },
