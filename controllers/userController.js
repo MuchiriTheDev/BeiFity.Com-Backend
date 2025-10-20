@@ -124,13 +124,12 @@ export const getAuthenticatedProfile = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to fetch authenticated profile' });
   }
 };
-
 /**
  * Update User Profile
  * @route PUT /api/profile/profile
  * @desc Update the authenticated user’s profile
  * @access Private (requires token)
- * @body {personalInfo: {fullname, username, email, profilePicture, phone, location, bio, socialLinks}, oldPassword, newPassword, preferences}
+ * @body {personalInfo: {fullname, username, profilePicture, phone, location: {country, county, constituency, fullAddress, coordinates: {type, coordinates}}, bio, socialLinks: {facebook, twitter, instagram, website}}, preferences}
  */
 export const updateUserProfile = async (req, res) => {
   try {
@@ -147,40 +146,75 @@ export const updateUserProfile = async (req, res) => {
 
     const { personalInfo, oldPassword, newPassword, preferences } = req.body;
 
+    // Prevent email and password changes
+    if (oldPassword || newPassword) {
+      logger.warn(`Profile update failed: Password change attempted for user ${req.user._id}`);
+      return res.status(400).json({ success: false, message: 'Password changes are not allowed in this endpoint' });
+    }
+    if (personalInfo && personalInfo.email) {
+      logger.warn(`Profile update failed: Email change attempted for user ${req.user._id}`);
+      return res.status(400).json({ success: false, message: 'Email changes are not allowed' });
+    }
+
     logger.debug(`Profile update data for user ${req.user._id}: ${JSON.stringify(req.body)}`);
 
     // Update personalInfo fields
     if (personalInfo) {
-      user.personalInfo.fullname = personalInfo.fullname?.trim() || user.personalInfo.fullname;
-      user.personalInfo.username = personalInfo.username?.trim() || user.personalInfo.username;
-      user.personalInfo.email = personalInfo.email?.trim() || user.personalInfo.email;
-      user.personalInfo.profilePicture = personalInfo.profilePicture || user.personalInfo.profilePicture;
-      user.personalInfo.phone = personalInfo.phone?.trim() || user.personalInfo.phone;
-      user.personalInfo.location = personalInfo.location || user.personalInfo.location;
-      user.personalInfo.bio = personalInfo.bio?.trim() || user.personalInfo.bio;
-      user.personalInfo.socialLinks = personalInfo.socialLinks || user.personalInfo.socialLinks;
-    }
+      // Simple string fields with trim
+      if (personalInfo.fullname !== undefined) {
+        user.personalInfo.fullname = personalInfo.fullname.trim();
+      }
+      if (personalInfo.username !== undefined) {
+        user.personalInfo.username = personalInfo.username.trim();
+      }
+      if (personalInfo.profilePicture !== undefined) {
+        user.personalInfo.profilePicture = personalInfo.profilePicture;
+      }
+      if (personalInfo.phone !== undefined) {
+        user.personalInfo.phone = personalInfo.phone.trim();
+      }
+      if (personalInfo.bio !== undefined) {
+        user.personalInfo.bio = personalInfo.bio.trim();
+      }
 
-    // Handle password update
-    if (oldPassword && newPassword) {
-      if (newPassword.length < 6) {
-        logger.warn(`Profile update failed: New password too short for user ${req.user._id}`);
-        return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+      // Merge location object (LocationSchema)
+      if (personalInfo.location) {
+        user.personalInfo.location = {
+          ...user.personalInfo.location.toObject(),
+          ...personalInfo.location,
+          coordinates: personalInfo.location.coordinates || user.personalInfo.location.coordinates,
+        };
+        // Ensure coordinates structure if provided
+        if (personalInfo.location.coordinates && !personalInfo.location.coordinates.type) {
+          user.personalInfo.location.coordinates = {
+            type: 'Point',
+            coordinates: personalInfo.location.coordinates.coordinates || [36.8219, -1.2921],
+          };
+        }
       }
-      const isValidPassword = await bcrypt.compare(oldPassword, user.personalInfo.password);
-      if (!isValidPassword) {
-        logger.warn(`Profile update failed: Invalid old password for user ${req.user._id}`);
-        return res.status(400).json({ success: false, message: 'Invalid old password' });
+
+      // Merge socialLinks object
+      if (personalInfo.socialLinks) {
+        user.personalInfo.socialLinks = {
+          ...user.personalInfo.socialLinks,
+          ...personalInfo.socialLinks,
+        };
+        // Trim social link strings
+        Object.keys(user.personalInfo.socialLinks).forEach(key => {
+          if (typeof user.personalInfo.socialLinks[key] === 'string') {
+            user.personalInfo.socialLinks[key] = user.personalInfo.socialLinks[key].trim();
+          }
+        });
       }
-      user.personalInfo.password = await bcrypt.hash(newPassword, 10);
-      logger.info(`Password updated for user ${req.user._id}`);
-    } else if (oldPassword || newPassword) {
-      logger.warn(`Profile update failed: Both oldPassword and newPassword required for user ${req.user._id}`);
-      return res.status(400).json({ success: false, message: 'Both oldPassword and newPassword are required' });
     }
 
     // Update preferences
-    user.preferences = preferences || user.preferences;
+    if (preferences) {
+      user.preferences = {
+        ...user.preferences,
+        ...preferences,
+      };
+    }
 
     // Update lastActive
     user.analytics.lastActive = new Date();
@@ -204,11 +238,10 @@ export const updateUserProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack,});
+    logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'Failed to update user profile' });
   }
 };
-
 /**
  * Get Seller Profile
  * @route GET /api/profile/seller/:sellerId

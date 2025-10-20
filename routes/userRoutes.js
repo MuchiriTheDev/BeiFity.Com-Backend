@@ -30,7 +30,7 @@ userRouter.post('/update-views/:sellerId', updateProfileViews); // Update profil
 // Private Routes (require authentication)
 userRouter.get('/auth/profile', authUser, getAuthenticatedProfile); // Fetch authenticated user’s full profile
 userRouter.post('/seller-review/:sellerId', authUser ,addSellerReview)
-userRouter.put('/update/profile', authUser, updateUserProfile); // Update authenticated user’s profile
+userRouter.put('/update/user', authUser, updateUserProfile); // Update authenticated user’s profile
 userRouter.post('/wishlist/:listingId', authUser, addToWishlist); // Add to wishlist
 userRouter.delete('/wishlist/:listingId', authUser, removeFromWishlist); // Remove from wishlist
 userRouter.post('/link/referral', authUser, getReferralLink); // Get referral link

@@ -223,12 +223,13 @@ const UserSchema = new mongoose.Schema(
     ],
     
     // Financials
+   // Financials
     financials: {
       balance: { type: Number, default: 0, min: 0 },
       swiftTransferId: { type: String },
       payoutHistory: [
         {
-          amount: { type: Number, min: 0 },
+          amount: { type: Number, min: -Infinity }, // Allow negatives for refunds; adjust min if needed
           date: { type: Date, default: Date.now, index: true },
           method: { type: String, enum: ['M-Pesa', 'Bank'] },
           status: { type: String, enum: ['pending', 'manual_pending', 'completed', 'failed', 'refunded'], default: 'pending' },

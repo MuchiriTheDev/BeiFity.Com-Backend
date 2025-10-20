@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import env from './env.js';
 import logger from '../utils/logger.js';
+import { userModel } from '../models/User.js';
 
 dotenv.config(); // Load environment variables
 
@@ -13,13 +14,13 @@ export const connectDB = async () => {
       throw new Error("❌ MONGO_DB_URL is not defined. Check your .env file or environment variables.");
     }
 
-     await mongoose.connect(mongoURI, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 5000, // Timeout after 5s if server unavailable
-        autoIndex: true, // Automatically build indexes defined in schemas
+    await mongoose.connect(mongoURI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000,
+      autoIndex: true,
     });
-    
+
 
     logger.info("✅ MongoDB connected successfully");
   } catch (error) {
@@ -32,6 +33,6 @@ export const connectDB = async () => {
       logger.error("🔴 Possible Fix: Check your MongoDB username/password in .env.");
     }
 
-    process.exit(1); // Exit process if connection fails
+    process.exit(1);
   }
 };
