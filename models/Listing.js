@@ -323,7 +323,7 @@ const ListingSchema = new mongoose.Schema({
   inventory: {
     type: Number,
     default: 1,
-    min: 1,
+    min: 0,
   },
   shippingOptions: {
     type: [String],

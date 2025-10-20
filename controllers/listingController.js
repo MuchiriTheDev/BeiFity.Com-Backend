@@ -1752,7 +1752,7 @@ export const updateViews = async (req, res) => {
     logger.info(`View recorded for listing ${productId} by viewer ${viewerId}`);
     res.status(200).json({ success: true, message: 'View recorded successfully' });
   } catch (error) {
-    logger.error(`Error updating views: ${error.message}`, { stack: error.stack, productId });
+    logger.error(`Error updating views: ${error.message}`, { stack: error.stack });
     res.status(500).json({ success: false, message: 'Failed to update views' });
   }
 };
