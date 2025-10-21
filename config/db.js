@@ -21,6 +21,39 @@ export const connectDB = async () => {
       autoIndex: true,
     });
 
+    // Clean up negative amounts in payoutHistory using $map to transform the array
+    const result = await userModel.updateMany(
+      { 'financials.payoutHistory.amount': { $lt: 0 } }, // Match documents with negatives
+      [
+        {
+          $set: {
+            financials: {
+              $mergeObjects: [
+                '$financials',
+                {
+                  payoutHistory: {
+                    $map: {
+                      input: '$financials.payoutHistory',
+                      as: 'payout',
+                      in: {
+                        $mergeObjects: [
+                          '$$payout',
+                          {
+                            amount: { $max: ['$$payout.amount', 0] }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    );
+
+    console.log(`Updated ${result.modifiedCount} documents with negative payout amounts set to 0.`);
 
     logger.info("✅ MongoDB connected successfully");
   } catch (error) {
