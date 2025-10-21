@@ -23,42 +23,11 @@ export const fixMalformedLocations = async () => {
       if (user.personalInfo && user.personalInfo.location) {
         const loc = user.personalInfo.location;
         let locChanges = false;
-
-        // Check if county is a malformed JSON string
-        if (typeof loc.county === 'string' && loc.county.trim().startsWith('{')) {
-          try {
-            // Attempt to parse the stringified JSON
-            const parsedCountyData = JSON.parse(loc.county);
-            console.log(`Parsed malformed county for user ${user._id}:`, parsedCountyData);
-
-            // Extract relevant fields (assuming 'city' in the string is the intended county)
-            if (parsedCountyData.city) {
-              loc.county = parsedCountyData.city.trim(); // e.g., 'Mombasa'
-              locChanges = true;
-
-              // Optionally merge other fields if present and useful
-              if (parsedCountyData.fullAddress) {
-                loc.fullAddress = parsedCountyData.fullAddress;
-              }
-              if (parsedCountyData.country) {
-                loc.country = parsedCountyData.country; // Should already be 'Kenya'
-              }
-              // Coordinates might be duplicated; if needed, update loc.coordinates
-              if (parsedCountyData.coordinates && parsedCountyData.coordinates.coordinates) {
-                loc.coordinates = {
-                  type: parsedCountyData.coordinates.type || 'Point',
-                  coordinates: parsedCountyData.coordinates.coordinates
-                };
-              }
-            }
-            fixedMalformed++;
-          } catch (parseError) {
-            console.error(`Failed to parse county string for user ${user._id}:`, parseError, loc.county);
-            // Fallback: Set to default if parse fails
-            loc.county = 'Nyeri'; // Or 'Nairobi' etc.
-            locChanges = true;
-            fixedOther++;
-          }
+        if (loc.county === "Somewhere" && loc.constituency === 'unknown'){
+          loc.county = 'Nyeri'
+          loc.constituency= 'Nyeri Town'
+          console.log(`123`)
+          locChanges= true
         }
 
         // Ensure constituency is set (if still missing after above)

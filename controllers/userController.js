@@ -313,7 +313,60 @@ export const getUsers = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to fetch users' });
   }
 };
+export const fixLocationOfAseller = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { ids, county, constituency } = req.body;
 
+    // Validate input
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      logger.warn(`Invalid ids provided: ${JSON.stringify(ids)}`);
+      return res.status(400).json({ success: false, message: 'Invalid or empty array of IDs provided' });
+    }
+
+    if (!county || !constituency) {
+      logger.warn(`Missing county or constituency in request body`);
+      return res.status(400).json({ success: false, message: 'County and constituency are required' });
+    }
+
+    // Check if user is admin
+    const admin = await userModel.findById(userId).select('personalInfo.isAdmin');
+    if (!admin || !admin.personalInfo.isAdmin) {
+      logger.warn(`Unauthorized access attempt by user ${userId}`);
+      return res.status(401).json({ success: false, message: 'Unauthorized: Admin access required' });
+    }
+
+    // Convert string IDs to ObjectIds if necessary
+    const objectIds = ids.map(id => {
+      if (typeof id === 'string') {
+        return new mongoose.Types.ObjectId(id);
+      }
+      return id; // Assume already ObjectId
+    });
+
+    // Use updateMany for efficiency (updates all matching documents atomically)
+    const updateResult = await userModel.updateMany(
+      { _id: { $in: objectIds } },
+      {
+        $set: {
+          'personalInfo.location.county': county.trim(),
+          'personalInfo.location.constituency': constituency.trim()
+        }
+      }
+    );
+
+    logger.info(`Updated locations for ${updateResult.modifiedCount} users: ${objectIds.join(', ')}`);
+
+    return res.json({
+      success: true,
+      message: `Successfully updated locations for ${updateResult.modifiedCount} users`,
+      updatedCount: updateResult.modifiedCount
+    });
+  } catch (error) {
+    logger.error(`Error fixing sellers locations: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ success: false, message: 'Failed to update sellers locations' });
+  }
+};
 /**
  * Get Specific Users by IDs
  * @route POST /api/profile/specific

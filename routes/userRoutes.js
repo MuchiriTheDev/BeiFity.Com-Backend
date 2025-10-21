@@ -14,6 +14,7 @@ import {
   getOnlySellers,
   removeSellerReview,
   deleteAccount,
+  fixLocationOfAseller,
 } from '../controllers/userController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
@@ -36,5 +37,6 @@ userRouter.delete('/wishlist/:listingId', authUser, removeFromWishlist); // Remo
 userRouter.post('/link/referral', authUser, getReferralLink); // Get referral link
 userRouter.post('/seller-review/:sellerId/:reviewId', authUser, removeSellerReview); // Remove seller review
 userRouter.delete('/delete-account', authUser, deleteAccount); // Delete user account
+userRouter.post('/admin/location/change', authUser, fixLocationOfAseller)
 
 export default userRouter;
