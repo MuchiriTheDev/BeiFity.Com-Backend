@@ -6,7 +6,6 @@ const LocationSchema = new mongoose.Schema({
   country: {
     type: String,
     default: 'Kenya',
-    required: true,
     enum: ['Kenya'],
   },
   county: {
@@ -15,7 +14,6 @@ const LocationSchema = new mongoose.Schema({
   },
   constituency: {
     type: String,
-    required: true,
   },
   fullAddress: {
     type: String,
@@ -84,7 +82,6 @@ const UserSchema = new mongoose.Schema(
       },
       location: {
         type: LocationSchema,
-        required: true,
       },
       bio: {
         type: String,
