@@ -280,8 +280,8 @@ export const getSeller = async (req, res) => {
         createdAt: seller.createdAt,
       },
     });
-  } catch (error) {
-    logger.error(`Error fetching seller profile: ${error.message}`, { stack: error.stack, sellerId });
+  } catch (error) {    
+    logger.error(`Error fetching seller profile: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'Failed to fetch seller profile' });
   }
 };

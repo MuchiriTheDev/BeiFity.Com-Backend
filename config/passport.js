@@ -17,6 +17,7 @@ passport.use(
       callbackURL: `${process.env.BACKEND_URL}/users/google/callback`,
     },
     async (accessToken, refreshToken, profile, done) => {
+      console.log(profile)
       try {
         const email = profile.emails[0].value;
         let user = await userModel.findOne({ 'personalInfo.email': email });
@@ -32,7 +33,7 @@ passport.use(
               email,
               password: hashedPlaceholderPassword, // No real password needed
               profilePicture: profile.photos[0]?.value || '',
-              phone: null , // Default; prompt to update later
+              phone: "+254712345678" , // Default; prompt to update later
               verified: true, // Google-verified
             },
             analytics: { lastActive: new Date() },
