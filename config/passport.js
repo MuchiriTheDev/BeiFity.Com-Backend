@@ -17,7 +17,6 @@ passport.use(
       callbackURL: `${process.env.BACKEND_URL}/users/google/callback`,
     },
     async (accessToken, refreshToken, profile, done) => {
-      console.log(profile)
       try {
         const email = profile.emails[0].value;
         let user = await userModel.findOne({ 'personalInfo.email': email });
