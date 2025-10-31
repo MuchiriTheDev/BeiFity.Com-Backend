@@ -109,6 +109,10 @@ const ProductInfoSchema = new mongoose.Schema({
       message: 'Maximum 5 tags allowed',
     },
   },
+  onOffer :{
+    type: Boolean,
+    default: false,
+  },
   sizes: {
     type: [String],
     default: [],

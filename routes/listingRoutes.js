@@ -35,6 +35,7 @@ import {
   verifyListing
 } from '../controllers/listingController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
+import { bulkToggleListingOffer, toggleListingOffer } from '../controllers/AdminControllers/ListingAdminController.js';
 
 const listingRouter = express.Router();
 
@@ -76,5 +77,7 @@ listingRouter.put('/admin/:productId/acceptance-rate', authUser, updateAcceptanc
 listingRouter.put('/admin/:productId/conversion-rate', authUser, updateConversionRate);
 listingRouter.put('/admin/:productId/feature', authUser, featureListing);
 listingRouter.post('/admin/update-all', authUser, updateAllListings);
+listingRouter.put('/admin/:productId/offer', authUser, toggleListingOffer);
+listingRouter.put('/admin/bulk-toggle-offer', authUser, bulkToggleListingOffer);
 
 export default listingRouter;
