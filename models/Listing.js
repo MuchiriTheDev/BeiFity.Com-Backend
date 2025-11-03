@@ -340,7 +340,6 @@ const ListingSchema = new mongoose.Schema({
   expiresAt: {
     type: Date,
     required: true,
-    index: { expireAfterSeconds: 2592000 }, // TTL index for 30 days auto-expiry
   },
   isActive: {
     type: Boolean,
