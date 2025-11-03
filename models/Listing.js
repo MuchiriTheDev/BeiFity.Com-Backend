@@ -355,7 +355,6 @@ const ListingSchema = new mongoose.Schema({
 ListingSchema.index({ 'seller.sellerId': 1 });
 ListingSchema.index({ 'location.coordinates': '2dsphere' });
 ListingSchema.index({ category: 1, 'location.county': 1 }); // For category/location searches
-ListingSchema.index({ isActive: 1, expiresAt: 1 });
 ListingSchema.index({ isSold: 1 });
 
 // Pre-save hook to calculate rating
