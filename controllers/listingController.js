@@ -15,6 +15,7 @@ import { sendNotification } from './notificationController.js';
 import { generateInquiryEmailBuyer, generateInquiryEmailSeller, generateNegotiationEmailBuyer, generateNegotiationEmailSeller, generateProductRequestEmail } from '../utils/Templates.js';
 
 
+
 // Add Listing
 export const addListing = async (req, res) => {
   const session = await mongoose.startSession();
@@ -582,6 +583,29 @@ export const addToCart = async (req, res) => {
       logger.warn(`Add to cart failed: Listing ${productId} not available`);
       return res.status(404).json({ success: false, message: 'Listing not available' });
     }
+    // Sending notification to the admin about the cart addition
+    const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+    if(admin){
+      if(userId){
+        const user = await userModel.findById(userId);
+        await sendNotification(
+          admin._id,
+          'admin_listing_cart_addition',
+          `The listing "${listing.productInfo.name}" by ${user.personalInfo.fullname} has been added to a cart.`,
+          userId,
+          session
+        );
+      }
+      if(guestId){
+        await sendNotification(
+          admin._id,
+          'admin_listing_cart_addition',
+          `The listing "${listing.productInfo.name}" by guest ${guestId} has been added to a cart.`,
+          null,
+          session
+        );
+      }
+    }
 
     if (req.user && userId) {
       if (req.user._id.toString() !== userId) {
@@ -604,6 +628,21 @@ export const addToCart = async (req, res) => {
 
       await session.commitTransaction();
       logger.info(`Listing ${productId} added to cart by user ${userId}`);
+      const user = await userModel.findById(userId);
+      if (!user) {
+        logger.warn(`Add to cart failed: User ${userId} not found`);
+      }
+      const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+      if(admin){ 
+        logger.info(`Admin found for add to cart: ${admin._id}`);
+        await sendNotification(
+          admin._id,
+          'admin_listing_cart_addition',
+          `The listing "${listing.productInfo.name}" by ${user.personalInfo.fullname} has been added to a cart.`,
+          userId,
+          session
+        );
+      }
       res.status(200).json({ success: true, message: 'Added to cart successfully' });
     } else if (guestId) {
       if (listing.analytics.cartAdditions.guestIds.includes(guestId)) {
@@ -622,6 +661,17 @@ export const addToCart = async (req, res) => {
 
       await session.commitTransaction();
       logger.info(`Listing ${productId} added to cart by guest ${guestId}`);
+      const admin = await userModel.findOne({ 'personalInfo.isAdmin': true }).session(session);
+      if(admin){ 
+        logger.info(`Admin found for add to cart: ${admin._id}`);
+        await sendNotification(
+          admin._id,
+          'admin_listing_cart_addition',
+          `The listing "${listing.productInfo.name}" by ${guestId} has been added to a cart.`,
+          userId,
+          session
+        );
+      }
       res.status(200).json({ success: true, message: 'Added to cart (guest)' });
     } else {
       logger.warn('Add to cart failed: User ID or Guest ID required', { productId });
@@ -649,6 +699,8 @@ export const removeFromWishlist = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Listing not found, not verified, or sold' });
     }
 
+    // 
+
     if (userId) {
       if (!listing.analytics.wishlist.userIds.includes(userId)) {
         logger.warn(`Remove from wishlist failed: Listing ${productId} not in wishlist for user ${userId}`);
@@ -662,9 +714,13 @@ export const removeFromWishlist = async (req, res) => {
       await userModel.findByIdAndUpdate(userId, { $pull: { wishlist: listing._id } });
       await userModel.findByIdAndUpdate(listing.seller.sellerId, { $inc: { 'analytics.wishlistCount': -1 } });
 
-      logger.info(`Listing ${productId} removed from wishlist by user ${userId}`);
+      logger.info(`Listing ${productId} removed from wishlist by user ${userId}`)
+      const user = await userModel.findById(userId);
+      if (user) {}
       return res.status(200).json({ success: true, message: 'Removed from wishlist successfully' });
+      
     }
+
 
     if (guestId) {
       if (!listing.analytics.wishlist.guestIds.includes(guestId)) {
@@ -1778,7 +1834,22 @@ export const removeFromCart = async (req, res) => {
         logger.warn(`Remove from cart failed: Listing ${productId} not in cart for user ${userId}`);
         return res.status(400).json({ success: false, message: 'Not in cart' });
       }
-
+      const user = await userModel.findById(userId);
+      if (!user) {
+        logger.warn(`Remove from cart failed: User ${userId} not found`);
+        return res.status(404).json({ success: false, message: 'User not found' });
+      }
+      const admin = await userModel.findOne({'personalInfo.isAdmin': true});
+      if(admin){
+        logger.info(`Admin ${admin._id} is notified of cart removal by user ${userId} for listing ${productId}`);
+        await sendNotification(
+          admin._id,
+          'cart_removal',
+          `User ${user.personalInfo.fullname} (${user.personalInfo.email}) removed listing "${listing.productInfo.name}" from their cart.`,
+          null
+        );
+      }
+     
       listing.analytics.cartAdditions.userIds.pull(userId);
       listing.analytics.cartAdditions.total = Math.max(0, (listing.analytics.cartAdditions.total || 0) - 1);
       await listing.save();
