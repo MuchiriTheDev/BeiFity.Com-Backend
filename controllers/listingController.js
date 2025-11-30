@@ -591,7 +591,7 @@ export const addToCart = async (req, res) => {
         await sendNotification(
           admin._id,
           'admin_listing_cart_addition',
-          `The listing "${listing.productInfo.name}" by ${user.personalInfo.fullname} has been added to a cart.`,
+          `The listing "${listing.productInfo.name}" has been added to a cart by ${user.personalInfo.fullname}.`,
           userId,
           session
         );
@@ -600,7 +600,7 @@ export const addToCart = async (req, res) => {
         await sendNotification(
           admin._id,
           'admin_listing_cart_addition',
-          `The listing "${listing.productInfo.name}" by guest ${guestId} has been added to a cart.`,
+          `The listing "${listing.productInfo.name}"  has been added to a cart by guest ${guestId}`,
           null,
           session
         );
@@ -638,7 +638,7 @@ export const addToCart = async (req, res) => {
         await sendNotification(
           admin._id,
           'admin_listing_cart_addition',
-          `The listing "${listing.productInfo.name}" by ${user.personalInfo.fullname} has been added to a cart.`,
+          `The listing "${listing.productInfo.name}" has been added to a cart by ${user.personalInfo.fullname}.`,
           userId,
           session
         );
@@ -667,7 +667,7 @@ export const addToCart = async (req, res) => {
         await sendNotification(
           admin._id,
           'admin_listing_cart_addition',
-          `The listing "${listing.productInfo.name}" by ${guestId} has been added to a cart.`,
+          `The listing "${listing.productInfo.name}" has been added to a cart by guest ${guestId}`,
           userId,
           session
         );
@@ -1824,7 +1824,25 @@ export const removeFromCart = async (req, res) => {
       logger.warn(`Remove from cart failed: Listing ${productId} not available`);
       return res.status(404).json({ success: false, message: 'Listing not available' });
     }
-
+    const admin = await userModel.findOne({'personalInfo.isAdmin': true});
+    if(admin){
+     if(userId){
+      await sendNotification(
+        admin._id,
+        'cart_removal',
+        `User ${user.personalInfo.fullname} (${user.personalInfo.email}) removed listing "${listing.productInfo.name}" from their cart.`,
+        null
+      );
+     }
+     if(guestId){
+      await sendNotification(
+        admin._id,
+        'cart_removal',
+        `Guest ${guestId} removed listing "${listing.productInfo.name}" from their cart.`,
+        null
+      );
+     }
+    } 
     if (req.user && userId) {
       if (req.user._id.toString() !== userId) {
         logger.warn(`Remove from cart failed: User ${req.user._id} attempted to remove as ${userId}`);

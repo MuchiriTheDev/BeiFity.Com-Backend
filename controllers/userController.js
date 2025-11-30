@@ -69,7 +69,7 @@ export const getUserProfile = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await userModel.findById(userId).select('-personalInfo.password -personalInfo.mobileDetails' );
+    const user = await userModel.findById(userId).select('-personalInfo.password -personalInfo.mobileDetails -personalInfo.bankDetails -personalInfo.email' );
     if (!user) {
       logger.warn(`User profile fetch failed: User ${userId} not found`);
       return res.status(404).json({ success: false, message: 'User not found' });
