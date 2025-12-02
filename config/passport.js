@@ -29,7 +29,7 @@ passport.use(
           user = new userModel({
             personalInfo: {
               fullname: profile.displayName,
-              email,
+              email: email.toLowerCase(),
               password: hashedPlaceholderPassword, // No real password needed
               profilePicture: profile.photos[0]?.value || '',
               phone: "+254712345678" , // Default; prompt to update later

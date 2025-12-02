@@ -69,7 +69,7 @@ export const getUserProfile = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await userModel.findById(userId).select('-personalInfo.password -personalInfo.mobileDetails -personalInfo.bankDetails -personalInfo.email' );
+    const user = await userModel.findById(userId).select('-personalInfo.password -personalInfo.mobileDetails -personalInfo.bankDetails' );
     if (!user) {
       logger.warn(`User profile fetch failed: User ${userId} not found`);
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -179,10 +179,11 @@ export const updateUserProfile = async (req, res) => {
 
       // Merge location object (LocationSchema)
       if (personalInfo.location) {
+        console.log(personalInfo.location);
         user.personalInfo.location = {
-          ...user.personalInfo.location.toObject(),
+          ...user.personalInfo.location,
           ...personalInfo.location,
-          coordinates: personalInfo.location.coordinates || user.personalInfo.location.coordinates,
+          // coordinates: personalInfo.location.coordinates || user.personalInfo.location.coordinates,
         };
         // Ensure coordinates structure if provided
         if (personalInfo.location.coordinates && !personalInfo.location.coordinates.type) {
@@ -238,6 +239,7 @@ export const updateUserProfile = async (req, res) => {
       },
     });
   } catch (error) {
+    console.log(error);
     logger.error(`Error updating user profile: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ success: false, message: 'Failed to update user profile' });
   }
