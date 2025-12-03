@@ -1,6 +1,10 @@
 import { listingModel } from "../../models/Listing.js";
 import { userModel } from "../../models/User.js";
+import { orderModel } from "../../models/Order.js";
+import { TransactionModel } from "../../models/Transaction.js";
 import logger from "../../utils/logger.js";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import env from "../../config/env.js";
 
 export const toggleListingOffer = async (req, res) => {
   try {
@@ -42,5 +46,6 @@ export const bulkToggleListingOffer = async (req, res) => {
   } catch (error) {
     logger.error('Error bulk toggling listing offer status:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
-  } 
+  }
 };
+

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getSellerAnalytics, getSellerInquiries, getSellerListings, getSellerOverview, getSellerTransactions } from '../controllers/dashboardController.js';
+import { getComprehensiveProductAnalytics, getSellerAnalytics, getSellerInquiries, getSellerListings, getSellerOverview, getSellerTransactions } from '../controllers/dashboardController.js';
 import { authUser } from '../middlewares/authMiddleware.js';
 
 const dashboardRouter = express.Router();
@@ -18,5 +18,8 @@ dashboardRouter.get('/analytics',authUser, getSellerAnalytics);
 
 // Inquiries: Recent buyer inquiries/negotiations
 dashboardRouter.get('/inquiries',authUser, getSellerInquiries);
+
+// Comprehensive Product Analytics
+dashboardRouter.get('/admin/comprehensive-product-analytics', authUser, getComprehensiveProductAnalytics);
 
 export default dashboardRouter;
