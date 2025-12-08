@@ -127,14 +127,15 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const genAI = new GoogleGenerativeAI("AIzaSyAFnImob_Ibpy9bATixnhK7WM12zhkVogo");
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Updated to faster model
 
     // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
-    const prompt = `
-You are an AI verifier for a Kenyan marketplace. Approve 90%+ of listings unless clear violations (e.g., drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues; focus on safety/legal compliance.
+    const prompt = `You are an AI verifier for a Kenyan marketplace. Your task is to verify product listings and return ONLY valid JSON.
 
-**Listing**:
+APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues. Focus on safety/legal compliance.
+
+**LISTING DETAILS:**
 - Name: ${listingData.productInfo.name}
 - Description: ${listingData.productInfo.description}
 - Details: ${listingData.productInfo.details.substring(0, 500)}... (truncated)
@@ -150,39 +151,117 @@ You are an AI verifier for a Kenyan marketplace. Approve 90%+ of listings unless
 - Location: ${listingData.location.county}, ${listingData.location.constituency}, ${listingData.location.country}
 - Shipping: ${JSON.stringify(listingData.shippingOptions)}
 
-**Guidelines**: Block prohibited items (drugs, weapons, illegal goods). Ensure no hate/offensive language. Pricing fair for Kenya market/condition. Images relevant.
+**VERIFICATION GUIDELINES:**
+- Block prohibited items (drugs, weapons, illegal goods)
+- Ensure no hate/offensive language
+- Pricing should be fair for Kenya market/condition
+- Images should be relevant to the product
 
-**Output JSON**:
+**CRITICAL:** Return ONLY valid JSON. No markdown, no explanations, no additional text. Response must be parseable JSON.
+
+**REQUIRED JSON FORMAT:**
 {
-  "verified": "Verified" | "Rejected",
+  "verified": "Verified",
   "findings": [
     {
-      "title": "Short title",
+      "title": "Issue title",
       "description": "Brief explanation",
-      "action": "Specific fix",
-      "priority": "high" | "medium" | "low"
+      "action": "Specific fix needed",
+      "priority": "high"
     }
   ]
-}
-`;
+}`;
 
-    const result = await model.generateContent({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 800 }, // Lower temp for consistency, shorter output
-      safetySettings: [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      ],
-    });
+    // Function to attempt AI verification with retry
+    const attemptVerification = async (retryCount = 0) => {
+      try {
+        const result = await model.generateContent({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1, // Very low temperature for consistent JSON
+            maxOutputTokens: 600, // Shorter output to reduce rambling
+            topP: 0.1, // More focused responses
+            responseMimeType: "application/json" // Explicitly request JSON
+          },
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+          ],
+        });
+        console.log('Result :', result.response.text())
+        return result;
+      } catch (error) {
+        if (retryCount < 2) { // Retry up to 2 times
+          logger.warn(`AI call failed, retrying (${retryCount + 1}/2): ${error.message}`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          return attemptVerification(retryCount + 1);
+        }
+        throw error;
+      }
+    };
+
+    const result = await attemptVerification();
+    console.log(result.response);
 
     let aiResponse;
     try {
-      const rawResponse = result.response.text().replace(/```json\s*|\s*```/g, '').trim();
-      aiResponse = JSON.parse(rawResponse);
+      const rawText = result.response.text();
+      console.log('Raw AI response:', rawText);
+
+      // Function to robustly parse AI response
+      const parseAIResponse = (text) => {
+        // Remove markdown code blocks
+        let cleaned = text.replace(/```(?:json)?\s*/gi, '').replace(/```\s*$/gi, '').trim();
+
+        // Try to find JSON object within the text
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          cleaned = jsonMatch[0];
+        }
+
+        // Attempt to parse
+        let parsed = JSON.parse(cleaned);
+
+        // Validate the structure
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid JSON structure');
+        }
+
+        // Ensure required fields exist with defaults
+        parsed.verified = ['Verified', 'Rejected'].includes(parsed.verified) ? parsed.verified : 'Rejected';
+        parsed.findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+
+        // Validate findings structure
+        parsed.findings = parsed.findings.map(finding => {
+          if (!finding || typeof finding !== 'object') {
+            return { title: 'Invalid Finding', description: 'AI returned malformed finding', action: 'Review manually', priority: 'high' };
+          }
+          return {
+            title: finding.title || 'Unknown Issue',
+            description: finding.description || 'No description provided',
+            action: finding.action || 'Manual review needed',
+            priority: ['high', 'medium', 'low'].includes(finding.priority) ? finding.priority : 'medium'
+          };
+        });
+
+        return parsed;
+      };
+
+      aiResponse = parseAIResponse(rawText);
+
     } catch (error) {
       logger.error(`AI parse error for listing ${productId}: ${error.message}`);
-      aiResponse = { verified: 'Rejected', findings: [{ title: 'Verification Error', description: 'AI processing failed', action: 'Manual review needed', priority: 'high' }] };
+      logger.error(`Raw response was: ${result.response.text()}`);
+      aiResponse = {
+        verified: 'Rejected',
+        findings: [{
+          title: 'AI Processing Error',
+          description: 'Failed to parse AI response. The listing will be manually reviewed.',
+          action: 'Please wait for manual verification or contact support',
+          priority: 'high'
+        }]
+      };
     }
 
     listingData.verified = aiResponse.verified;
