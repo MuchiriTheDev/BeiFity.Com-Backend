@@ -126,12 +126,29 @@ export const addListing = async (req, res) => {
       isActive: true,
     };
 
-    // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI("AIzaSyDQOP6xPXm83hzYx_CgMbijsnCMAWvcfow");
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Updated to faster model
+    // AI Verification with fallback
+    let aiResponse = {
+      verified: 'Pending',
+      findings: [{
+        title: 'AI Verification Pending',
+        description: 'AI verification is temporarily unavailable. Listing will be reviewed manually.',
+        action: 'Please wait for admin review',
+        priority: 'medium'
+      }]
+    };
 
-    // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
-    const prompt = `You are an AI verifier for a Kenyan marketplace. APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues.
+    try {
+      // Initialize Google Gemini
+      if (!process.env.GEMINI_API_KEY) {
+        logger.warn('GEMINI_API_KEY not found in environment variables - using fallback verification');
+        throw new Error('AI verification unavailable: Missing API key');
+      }
+
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+      // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
+      const prompt = `You are an AI verifier for a Kenyan marketplace. APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues.
 
 LISTING:
 - Name: ${listingData.productInfo.name}
@@ -164,40 +181,39 @@ Return ONLY valid JSON:
   ]
 }`;
 
-    // Function to attempt AI verification with retry
-    const attemptVerification = async (retryCount = 0) => {
-      try {
-        const result = await model.generateContent({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1, // Very low temperature for consistent JSON
-            maxOutputTokens: 1000, // Increased to allow complete JSON responses
-            topP: 0.1, // More focused responses
-            responseMimeType: "application/json" // Explicitly request JSON
-          },
-          safetySettings: [
-            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-          ],
-        });
-        console.log('Result :', result.response.text())
-        return result;
-      } catch (error) {
-        if (retryCount < 2) { // Retry up to 2 times
-          logger.warn(`AI call failed, retrying (${retryCount + 1}/2): ${error.message}`);
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-          return attemptVerification(retryCount + 1);
+      // Function to attempt AI verification with retry
+      const attemptVerification = async (retryCount = 0) => {
+        try {
+          const result = await model.generateContent({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1, // Very low temperature for consistent JSON
+              maxOutputTokens: 1000, // Increased to allow complete JSON responses
+              topP: 0.1, // More focused responses
+              responseMimeType: "application/json" // Explicitly request JSON
+            },
+            safetySettings: [
+              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+            ],
+          });
+          console.log('Result :', result.response.text())
+          return result;
+        } catch (error) {
+          if (retryCount < 2) { // Retry up to 2 times
+            logger.warn(`AI call failed, retrying (${retryCount + 1}/2): ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+            return attemptVerification(retryCount + 1);
+          }
+          throw error;
         }
-        throw error;
-      }
-    };
+      };
 
-    const result = await attemptVerification();
-    console.log(result.response);
+      const result = await attemptVerification();
+      console.log(result.response);
 
-    let aiResponse;
-    try {
+      // Parse AI response
       const rawText = result.response.text();
       console.log('Raw AI response:', rawText);
 
@@ -241,19 +257,12 @@ Return ONLY valid JSON:
       };
 
       aiResponse = parseAIResponse(rawText);
+      logger.info(`AI verification completed for listing ${productId}: ${aiResponse.verified}`);
 
-    } catch (error) {
-      logger.error(`AI parse error for listing ${productId}: ${error.message}`);
-      logger.error(`Raw response was: ${result.response.text()}`);
-      aiResponse = {
-        verified: 'Rejected',
-        findings: [{
-          title: 'AI Processing Error',
-          description: 'Failed to parse AI response. The listing will be manually reviewed.',
-          action: 'Please wait for manual verification or contact support',
-          priority: 'high'
-        }]
-      };
+    } catch (aiError) {
+      logger.error(`AI verification failed for listing ${productId}: ${aiError.message}`);
+      logger.warn('Using fallback verification - listing set to Pending status');
+      // aiResponse is already set to fallback values above
     }
 
     listingData.verified = aiResponse.verified;
@@ -271,19 +280,33 @@ Return ONLY valid JSON:
 
     // Notify seller
     const findingsSummary = aiResponse.findings.map(f => `- ${f.title} (${f.priority}): ${f.description}\nAction: ${f.action}`).join('\n');
-    const message = aiResponse.verified === 'Verified' 
-      ? `Your listing "${listingData.productInfo.name}" is live!` 
-      : `Listing "${listingData.productInfo.name}" rejected. Review:\n${findingsSummary}`;
-    await sendNotification(userId, aiResponse.verified.toLowerCase() + '_listing', message, null, session);
 
-    // Notify admins if rejected
-    if (aiResponse.verified === 'Rejected') {
+    let message, notificationType;
+    if (aiResponse.verified === 'Verified') {
+      message = `Your listing "${listingData.productInfo.name}" is live!`;
+      notificationType = 'verified_listing';
+    } else if (aiResponse.verified === 'Rejected') {
+      message = `Listing "${listingData.productInfo.name}" rejected. Review:\n${findingsSummary}`;
+      notificationType = 'rejected_listing';
+    } else {
+      message = `Your listing "${listingData.productInfo.name}" is pending review. ${findingsSummary}`;
+      notificationType = 'pending_listing';
+    }
+
+    await sendNotification(userId, notificationType, message, null, session);
+
+    // Notify admins for rejected or pending listings
+    if (aiResponse.verified === 'Rejected' || aiResponse.verified === 'Pending') {
       const admins = await userModel.find({ 'personalInfo.isAdmin': true }).select('_id').session(session);
+      const adminMessage = aiResponse.verified === 'Rejected'
+        ? `Rejected listing "${listingData.productInfo.name}" by ${user.personalInfo.fullname}:\n${findingsSummary}`
+        : `Pending listing "${listingData.productInfo.name}" by ${user.personalInfo.fullname} requires manual review:\n${findingsSummary}`;
+
       for (const admin of admins) {
         await sendNotification(
           admin._id,
           'admin_review_needed',
-          `Rejected listing "${listingData.productInfo.name}" by ${user.personalInfo.fullname}:\n${findingsSummary}`,
+          adminMessage,
           userId,
           session
         );
