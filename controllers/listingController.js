@@ -131,11 +131,9 @@ export const addListing = async (req, res) => {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Updated to faster model
 
     // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
-    const prompt = `You are an AI verifier for a Kenyan marketplace. Your task is to verify product listings and return ONLY valid JSON.
+    const prompt = `You are an AI verifier for a Kenyan marketplace. APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues.
 
-APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, offensive content). Be lenient on pricing, vague details, or minor issues. Focus on safety/legal compliance.
-
-**LISTING DETAILS:**
+LISTING:
 - Name: ${listingData.productInfo.name}
 - Description: ${listingData.productInfo.description}
 - Details: ${listingData.productInfo.details.substring(0, 500)}... (truncated)
@@ -151,15 +149,9 @@ APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, 
 - Location: ${listingData.location.county}, ${listingData.location.constituency}, ${listingData.location.country}
 - Shipping: ${JSON.stringify(listingData.shippingOptions)}
 
-**VERIFICATION GUIDELINES:**
-- Block prohibited items (drugs, weapons, illegal goods)
-- Ensure no hate/offensive language
-- Pricing should be fair for Kenya market/condition
-- Images should be relevant to the product
+GUIDELINES: Block prohibited items (drugs, weapons, illegal goods). No hate/offensive language. Fair pricing for Kenya market. Also make sure you can understand the words in the details don't allow eg "guururnicewono" something like this
 
-**CRITICAL:** Return ONLY valid JSON. No markdown, no explanations, no additional text. Response must be parseable JSON.
-
-**REQUIRED JSON FORMAT:**
+Return ONLY valid JSON:
 {
   "verified": "Verified",
   "findings": [
@@ -179,7 +171,7 @@ APPROVE 90%+ of listings unless clear violations (drugs, weapons, counterfeits, 
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.1, // Very low temperature for consistent JSON
-            maxOutputTokens: 600, // Shorter output to reduce rambling
+            maxOutputTokens: 1000, // Increased to allow complete JSON responses
             topP: 0.1, // More focused responses
             responseMimeType: "application/json" // Explicitly request JSON
           },
