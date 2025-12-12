@@ -127,7 +127,7 @@ export const addListing = async (req, res) => {
     };
 
     // Initialize Google Gemini
-    const genAI = new GoogleGenerativeAI("AIzaSyAFnImob_Ibpy9bATixnhK7WM12zhkVogo");
+    const genAI = new GoogleGenerativeAI("AIzaSyAX6iMtJTSEL9P4Ea33ExcehmMmu6R4LHM");
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Updated to faster model
 
     // Optimized prompt for 90% approval: Lenient on pricing/details, strict on prohibited (drugs, etc.)
