@@ -2243,7 +2243,7 @@ export const getPendingListings = async (req, res) => {
     }
 
     const listings = await listingModel
-      .find({ verified: 'Rejected' })
+      .find({ verified: 'Pending' })
       .populate('seller.sellerId', 'personalInfo.fullname personalInfo.phone')
       .lean();
     logger.info(`Fetched ${listings.length} pending listings by admin ${req.user._id}`);
