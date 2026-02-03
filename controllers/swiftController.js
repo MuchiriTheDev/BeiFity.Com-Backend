@@ -29,7 +29,6 @@ const swift = axios.create({
     'Content-Type': 'application/json',
   },
 });
-console.log(swift)
 
 // Utility function for retry logic
 const withRetry = async (fn, maxRetries, description) => {
