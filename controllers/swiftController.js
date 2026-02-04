@@ -377,8 +377,24 @@ export const verifyTransactions = async (req, res) => {
       return res.status(400).json({ error: true, message: result.message });
     }
 
-    logger.info(`Transaction verified successfully via endpoint`, { reference });
-    return res.status(200).json({ success: true, data: result.data });
+    // Return success response with order status
+    const response = {
+      success: true,
+      message: result.data.status === 'completed' 
+        ? 'Payment verified successfully. Order confirmed!' 
+        : 'Payment is still pending. Please wait...',
+      data: {
+        ...result.data,
+        verified: result.data.status === 'completed'
+      }
+    };
+
+    logger.info(`Transaction verified successfully via endpoint`, { 
+      reference, 
+      status: result.data.status,
+      verified: response.data.verified 
+    });
+    return res.status(200).json(response);
   } catch (error) {
     console.log('Verify endpoint error:', error);
     logger.error(`Error in verifyTransactions endpoint: ${error.message}`, { stack: error.stack, reference: req.params.reference });
@@ -700,11 +716,13 @@ export const initiatePayout = async (transactionId, itemId, session) => {
 };
 /// Modified handleSwiftWebhook function - Optimized for speed
 export const handleSwiftWebhook = async (req, res) => {
-  console.log('Received SWIFT webhook:', req.body);
+  console.log('Received SWIFT webhook:', JSON.stringify(req.body, null, 2));
   logger.info('SWIFT webhook received', { 
     transaction_id: req.body.transaction_id, 
     external_reference: req.body.external_reference, 
-    status: req.body.status 
+    status: req.body.status,
+    success: req.body.success,
+    fullBody: req.body
   });
   try {
     // Wrap ONLY critical DB logic in retryable transaction (minimize scope for speed)
@@ -730,9 +748,23 @@ export const handleSwiftWebhook = async (req, res) => {
 
       const { transaction_id, external_reference, status, service_fee, result } = input;
 
-      logger.debug('Checking webhook validity', { status, resultCode: result?.ResultCode });
-      if (!transaction_id || status !== 'completed' || result.ResultCode !== 0) {
-        logger.warn(`Webhook invalid: status=${status}, code=${result.ResultCode}`, { transaction_id });
+      logger.debug('Checking webhook validity', { 
+        status, 
+        resultCode: result?.ResultCode,
+        hasResult: !!result,
+        fullInput: input 
+      });
+      
+      // Safely check result code - handle cases where result might be undefined
+      const resultCode = result?.ResultCode;
+      const isSuccess = status === 'completed' && (resultCode === 0 || resultCode === undefined);
+      
+      if (!transaction_id || !isSuccess) {
+        logger.warn(`Webhook invalid or failed: status=${status}, code=${resultCode}`, { 
+          transaction_id,
+          hasResult: !!result,
+          result 
+        });
         
         let order = null;  // FIXED: Declare outside with null fallback to avoid ReferenceError
         
@@ -840,9 +872,9 @@ export const handleSwiftWebhook = async (req, res) => {
         itemsCount: order.items.length 
       });
 
-      // Parse paidAt correctly (fast)
+      // Parse paidAt correctly (fast) - safely handle missing result
       let paidAt = new Date();  // Fallback to now
-      if (result && result.TransactionDate) {
+      if (result?.TransactionDate) {
         const tsStr = result.TransactionDate.toString().padStart(14, '0');  // Ensure 14 chars
         if (tsStr.length === 14 && /^\d{14}$/.test(tsStr)) {
           const year = parseInt(tsStr.slice(0, 4), 10);
@@ -860,6 +892,8 @@ export const handleSwiftWebhook = async (req, res) => {
         } else {
           logger.warn(`Unexpected TransactionDate format: ${result.TransactionDate}`);
         }
+      } else {
+        logger.debug('No TransactionDate in result, using current time', { hasResult: !!result });
       }
       logger.debug('Parsed paidAt', { paidAt: paidAt.toISOString() });
 
@@ -1201,11 +1235,25 @@ export const handleSwiftWebhook = async (req, res) => {
     // Early returns for non-processing cases
     if (txResult.type === 'not_found' || txResult.type === 'order_not_found') {
       logger.info('Webhook processed (not found case)', { type: txResult.type });
-      return res.status(200).send('OK');
+      return res.status(200).json({ success: true, message: 'Webhook received' });
+    }
+
+    // Success case - order has been verified and updated
+    if (txResult.type === 'success') {
+      logger.info('Webhook fully processed successfully (DB committed, notifications queued)', {
+        orderId: txResult.order?.orderId,
+        transactionId: txResult.transaction?._id
+      });
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Payment verified and order confirmed',
+        orderId: txResult.order?.orderId,
+        status: 'completed'
+      });
     }
 
     logger.info('Webhook fully processed successfully (DB committed, notifications queued)');
-    return res.status(200).send('OK');  // Respond immediately after DB commit
+    return res.status(200).json({ success: true, message: 'Webhook processed' });  // Respond immediately after DB commit
   } catch (error) {
     console.error('Error processing SWIFT webhook:', error);
     logger.error(`SWIFT webhook error: ${error.message}`, { stack: error.stack });
